@@ -86,7 +86,7 @@ jobs:
           git add pyproject.toml
           git diff --cached --quiet || git commit -m "release: v${{ steps.version.outputs.version }}"
           git tag "v${{ steps.version.outputs.version }}"
-          git push origin main --tags
+          git push origin kynetic-agents-main --tags
 
       - name: Create GitHub Release
         env:
