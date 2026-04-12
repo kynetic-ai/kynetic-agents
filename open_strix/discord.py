@@ -177,9 +177,31 @@ class DiscordBridge(discord.Client):
 
     async def on_message(self, message: discord.Message) -> None:
         author_id = getattr(message.author, "id", None)
+        bot_user = self.user
+
+        # Derive the home_channels gate context from the raw message object.
+        channel_name = str(getattr(message.channel, "name", "") or "")
+        channel_id = getattr(message.channel, "id", None)
+        mentions_bot = bot_user is not None and bot_user in message.mentions
+        is_always_respond = self._app.should_respond_to_bot(author_id)
+        if is_always_respond and bot_user is not None:
+            bot_id_str = str(getattr(bot_user, "id", ""))
+            bot_name = str(getattr(bot_user, "name", "")).lower()
+            content = message.content or ""
+            author_addressed_bot = (
+                bool(bot_id_str and bot_id_str in content)
+                or bool(bot_name and f"@{bot_name}" in content.lower())
+            )
+        else:
+            author_addressed_bot = False
+
         if not self._app.should_process_discord_message(
             author_is_bot=bool(getattr(message.author, "bot", False)),
             author_id=author_id,
+            channel_name=channel_name,
+            channel_id=channel_id,
+            mentions_bot=mentions_bot,
+            author_addressed_bot=author_addressed_bot,
         ):
             return
         await self._app.handle_discord_message(message)

@@ -31,6 +31,7 @@ journal_entries_in_prompt: 90
 discord_messages_in_prompt: 10
 discord_token_env: DISCORD_TOKEN
 always_respond_bot_ids: []
+home_channels: []
 api_port: 0
 web_ui_port: 8084
 web_ui_host: 127.0.0.1
@@ -215,6 +216,7 @@ class AppConfig:
     web_ui_port: int = 0
     web_ui_host: str = DEFAULT_WEB_UI_HOST
     web_ui_channel_id: str = DEFAULT_WEB_UI_CHANNEL_ID
+    home_channels: list[str] = field(default_factory=list)
     folders: dict[str, str] = field(default_factory=lambda: dict(DEFAULT_FOLDERS))
     mcp_servers: list[MCPServerConfig] = field(default_factory=list)
     disable_builtin_skills: set[str] = field(default_factory=set)
@@ -265,6 +267,12 @@ def _parse_folders(raw: Any) -> dict[str, str]:
     return folders if folders else dict(DEFAULT_FOLDERS)
 
 
+def _parse_home_channels(raw: Any) -> list[str]:
+    if not isinstance(raw, list):
+        return []
+    return [str(item).strip() for item in raw if str(item).strip()]
+
+
 def _parse_subagent_configs(raw: Any) -> list[SubAgentConfig]:
     """Parse subagent configurations from config.yaml."""
     if not isinstance(raw, list):
@@ -300,6 +308,7 @@ def load_config(layout: RepoLayout) -> AppConfig:
         discord_messages_in_prompt=int(loaded.get("discord_messages_in_prompt", 10)),
         discord_token_env=str(loaded.get("discord_token_env", "DISCORD_TOKEN")),
         always_respond_bot_ids=_normalize_id_list(loaded.get("always_respond_bot_ids")),
+        home_channels=_parse_home_channels(loaded.get("home_channels")),
         session_log_retention_days=int(loaded.get("session_log_retention_days", 30)),
         api_port=int(loaded.get("api_port", 0)),
         web_ui_port=int(loaded.get("web_ui_port", 0)),
@@ -331,6 +340,10 @@ def _ensure_config_defaults(config_file: Path) -> None:
 
     if "always_respond_bot_ids" not in loaded:
         loaded["always_respond_bot_ids"] = []
+        changed = True
+
+    if "home_channels" not in loaded:
+        loaded["home_channels"] = []
         changed = True
 
     if "api_port" not in loaded:

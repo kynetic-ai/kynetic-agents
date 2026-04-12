@@ -579,10 +579,26 @@ class OpenStrixApp(DiscordMixin, SchedulerMixin, ToolsMixin, WebChatMixin):
         *,
         author_is_bot: bool,
         author_id: str | int | None,
+        channel_name: str = "",
+        channel_id: str | int | None = None,
+        mentions_bot: bool = False,
+        author_addressed_bot: bool = False,
     ) -> bool:
-        if not author_is_bot:
-            return True
-        return self.should_respond_to_bot(author_id)
+        # First filter: ignore bots that aren't in the always-respond allowlist.
+        is_always_respond = self.should_respond_to_bot(author_id)
+        if author_is_bot and not is_always_respond:
+            return False
+
+        # Home-channels gate (only active when home_channels is configured).
+        if self.config.home_channels:
+            in_home_channel = (
+                channel_name in self.config.home_channels
+                or str(channel_id) in self.config.home_channels
+            )
+            if not (in_home_channel or mentions_bot or author_addressed_bot):
+                return False
+
+        return True
 
     def _iter_block_files(self) -> list[Path]:
         files = list(self.layout.blocks_dir.glob("*.yaml"))
