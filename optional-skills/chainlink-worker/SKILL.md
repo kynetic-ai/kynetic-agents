@@ -67,7 +67,7 @@ The worker closes the issue and then closes the Codex session on the next poll.
 
 Configure repo routing in `[repos]` inside `config.toml`.
 
-- Exact label match wins first, so label issues with repo names like `open-strix` or `vera-prism`
+- Exact label match wins first, so label issues with repo names like `kynetic-agents` or `vera-prism`
 - If no repo label is present, the worker falls back to matching repo labels in the issue title, description, or milestone text
 - If routing is ambiguous, the worker logs an error and skips the issue
 

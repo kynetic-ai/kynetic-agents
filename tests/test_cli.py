@@ -7,16 +7,16 @@ import subprocess
 import pytest
 import yaml
 
-import open_strix.cli as cli_mod
+import kynetic_agents.cli as cli_mod
 
 
-def test_cli_no_args_runs_open_strix(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_cli_no_args_runs_kynetic_agents(monkeypatch: pytest.MonkeyPatch) -> None:
     called: dict[str, object] = {}
 
-    def fake_run_open_strix(home: Path | None = None) -> None:
+    def fake_run_kynetic_agents(home: Path | None = None) -> None:
         called["home"] = home
 
-    monkeypatch.setattr(cli_mod, "run_open_strix", fake_run_open_strix)
+    monkeypatch.setattr(cli_mod, "run_kynetic_agents", fake_run_kynetic_agents)
     cli_mod.main([])
 
     assert called["home"] is None
@@ -33,11 +33,11 @@ def test_cli_no_args_does_not_auto_setup_when_not_git(
     def fail_setup(*_: object, **__: object) -> None:
         raise AssertionError("setup_home should not be called on normal run path")
 
-    def fake_run_open_strix(home: Path | None = None) -> None:
+    def fake_run_kynetic_agents(home: Path | None = None) -> None:
         called["run_home"] = home
 
     monkeypatch.setattr(cli_mod, "setup_home", fail_setup)
-    monkeypatch.setattr(cli_mod, "run_open_strix", fake_run_open_strix)
+    monkeypatch.setattr(cli_mod, "run_kynetic_agents", fake_run_kynetic_agents)
     cli_mod.main([])
 
     assert called["run_home"] is None
@@ -298,10 +298,10 @@ def test_write_service_assets_linux_generates_systemd_unit(
     )
 
     cli_mod._write_service_assets(home)
-    unit_path = home / "services" / "open-strix.service"
+    unit_path = home / "services" / "kynetic-agents.service"
     assert unit_path.exists()
     text = unit_path.read_text(encoding="utf-8")
-    assert "ExecStart=/usr/bin/uv run open-strix run --home" in text
+    assert "ExecStart=/usr/bin/uv run kynetic-agents run --home" in text
     assert str(home) in text
 
 
@@ -325,7 +325,7 @@ def test_write_service_assets_macos_generates_launchd_plist(
     text = plist_path.read_text(encoding="utf-8")
     assert "<key>Label</key>" in text
     assert label in text
-    assert "open-strix" in text
+    assert "kynetic-agents" in text
 
 
 def test_write_service_assets_windows_generates_task_scripts(
@@ -342,13 +342,13 @@ def test_write_service_assets_windows_generates_task_scripts(
     )
 
     cli_mod._write_service_assets(home)
-    install_script = home / "services" / "install-open-strix-task.ps1"
-    uninstall_script = home / "services" / "uninstall-open-strix-task.ps1"
+    install_script = home / "services" / "install-kynetic-agents-task.ps1"
+    uninstall_script = home / "services" / "uninstall-kynetic-agents-task.ps1"
     assert install_script.exists()
     assert uninstall_script.exists()
     install_text = install_script.read_text(encoding="utf-8")
     assert "Register-ScheduledTask" in install_text
-    assert "open-strix run --home" in install_text
+    assert "kynetic-agents run --home" in install_text
 
 
 def test_service_setup_section_linux_includes_systemd_commands(
@@ -366,7 +366,7 @@ def test_service_setup_section_linux_includes_systemd_commands(
 
     section = cli_mod._service_setup_section(home)
     assert "Linux/systemd user service" in section
-    assert "systemctl --user enable --now open-strix.service" in section
+    assert "systemctl --user enable --now kynetic-agents.service" in section
 
 
 def test_service_setup_section_windows_missing_tools_mentions_requirements(
@@ -401,6 +401,21 @@ def test_cli_setup_scaffolds_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(cli_mod.sys.stdin, "isatty", lambda: True)
     monkeypatch.setattr("builtins.input", lambda _: next(responses))
 
+    # Stub uv add so the test doesn't require kynetic-agents to be published on PyPI.
+    # Write a minimal pyproject.toml that satisfies _project_depends_on_kynetic_agents.
+    real_ensure_uv_project = cli_mod._ensure_uv_project
+
+    def fake_ensure_uv_project(home: Path) -> None:
+        pyproject_path = home / "pyproject.toml"
+        if not pyproject_path.exists():
+            home.mkdir(parents=True, exist_ok=True)
+            pyproject_path.write_text(
+                '[project]\nname = "agent-home"\nversion = "0.1.0"\ndependencies = ["kynetic-agents"]\n',
+                encoding="utf-8",
+            )
+
+    monkeypatch.setattr(cli_mod, "_ensure_uv_project", fake_ensure_uv_project)
+
     home = tmp_path / "agent-home"
     cli_mod.main(["setup", "--home", str(home)])
 
@@ -424,7 +439,7 @@ def test_cli_setup_scaffolds_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     assert "TAVILY_API_KEY=" in env_text
     assert "DISCORD_TOKEN=" in env_text
     pyproject_text = (home / "pyproject.toml").read_text(encoding="utf-8")
-    assert "open-strix" in pyproject_text
+    assert "kynetic-agents" in pyproject_text
     gitignore_text = (home / ".gitignore").read_text(encoding="utf-8")
     assert "logs/chat-history.jsonl" in gitignore_text
 
@@ -462,6 +477,17 @@ def test_cli_setup_prints_walkthrough(
     )
     monkeypatch.setattr(cli_mod.sys.stdin, "isatty", lambda: True)
     monkeypatch.setattr("builtins.input", lambda _: next(responses))
+
+    def fake_ensure_uv_project(home: Path) -> None:
+        pyproject_path = home / "pyproject.toml"
+        if not pyproject_path.exists():
+            home.mkdir(parents=True, exist_ok=True)
+            pyproject_path.write_text(
+                '[project]\nname = "walkthrough-home"\nversion = "0.1.0"\ndependencies = ["kynetic-agents"]\n',
+                encoding="utf-8",
+            )
+
+    monkeypatch.setattr(cli_mod, "_ensure_uv_project", fake_ensure_uv_project)
 
     home = tmp_path / "walkthrough-home"
     cli_mod.main(["setup", "--home", str(home)])

@@ -1,6 +1,6 @@
 # Sandboxing
 
-open-strix does not sandbox agent execution. Agents have full shell access via `bash` (or `powershell` on Windows) with no containerization, chroot, or process isolation.
+kynetic-agents does not sandbox agent execution. Agents have full shell access via `bash` (or `powershell` on Windows) with no containerization, chroot, or process isolation.
 
 This is a deliberate design choice, not an oversight.
 
@@ -11,10 +11,10 @@ This is a deliberate design choice, not an oversight.
 **Sandboxing adds real costs:**
 
 - **Breaks tooling.** Agents need to install packages, run scripts, access the network, read/write files across the home repo. Sandboxes make all of this harder. Every sandbox escape hatch you add erodes the security boundary anyway.
-- **Complexity budget.** open-strix is designed to run on a $5/month VPS. Adding Docker, gVisor, or nsjail to the dependency chain is a significant operational burden for a personal agent.
+- **Complexity budget.** kynetic-agents is designed to run on a $5/month VPS. Adding Docker, gVisor, or nsjail to the dependency chain is a significant operational burden for a personal agent.
 - **False sense of security.** A sandboxed agent that can send Discord messages, make API calls, and commit to git can still cause plenty of damage. The sandbox protects the host OS, not the things you actually care about (your Discord server, your API keys, your git history).
 
-## What open-strix does instead
+## What kynetic-agents does instead
 
 **File write restrictions.** Agent file writes are limited to `state/` and `skills/`. This isn't a security boundary — it's a guardrail to keep the agent from accidentally overwriting its own code. The agent can still write anywhere via bash.
 
@@ -24,6 +24,6 @@ This is a deliberate design choice, not an oversight.
 
 ## When you might want sandboxing
 
-If you're running an open-strix agent with access to production systems, shared infrastructure, or sensitive data beyond what's in the home repo, you should add your own isolation layer. Run the agent in a VM, container, or separate user account. open-strix won't fight you on this — it doesn't assume anything about its execution environment.
+If you're running an kynetic-agents agent with access to production systems, shared infrastructure, or sensitive data beyond what's in the home repo, you should add your own isolation layer. Run the agent in a VM, container, or separate user account. kynetic-agents won't fight you on this — it doesn't assume anything about its execution environment.
 
 But for the intended use case — a personal companion agent on a dedicated VPS — sandboxing is solving the wrong problem.

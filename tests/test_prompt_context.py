@@ -4,7 +4,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-import open_strix.app as app_mod
+import kynetic_agents.app as app_mod
 
 
 class DummyAgent:

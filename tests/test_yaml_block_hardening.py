@@ -7,7 +7,7 @@ from pathlib import Path
 import yaml
 import pytest
 
-from open_strix import app as app_mod
+from kynetic_agents import app as app_mod
 
 
 def _make_app(tmp_path: Path) -> app_mod.OpenStrixApp:

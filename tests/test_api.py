@@ -9,8 +9,8 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import AioHTTPTestCase, unittest_run_loop
 
-from open_strix.api import _build_app
-from open_strix.models import AgentEvent
+from kynetic_agents.api import _build_app
+from kynetic_agents.models import AgentEvent
 
 
 def _make_mock_app() -> MagicMock:

@@ -10,10 +10,10 @@ import os
 import re
 from pathlib import Path
 
-import open_strix.tools as tools_mod
+import kynetic_agents.tools as tools_mod
 
 
-TOOLS_PY = Path(__file__).resolve().parent.parent / "open_strix" / "tools.py"
+TOOLS_PY = Path(__file__).resolve().parent.parent / "kynetic_agents" / "tools.py"
 
 
 def test_all_tools_registered():

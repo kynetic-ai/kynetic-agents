@@ -1,6 +1,6 @@
 # Events API
 
-open-strix logs every significant event to `logs/events.jsonl`. This is the agent's self-diagnosis backbone — a complete record of what happened, when, and why. The agent can read its own event log, and the [introspection skill](../open_strix/builtin_skills/introspection/SKILL.md) teaches it how.
+kynetic-agents logs every significant event to `logs/events.jsonl`. This is the agent's self-diagnosis backbone — a complete record of what happened, when, and why. The agent can read its own event log, and the [introspection skill](../kynetic_agents/builtin_skills/introspection/SKILL.md) teaches it how.
 
 Conversation history is also persisted separately in `logs/chat-history.jsonl` as an append-only transcript of messages and reactions across Discord, the local web UI, and stdin sessions.
 
@@ -287,7 +287,7 @@ jq --arg ch "1474541386467377273" 'select(.type == "discord_message" and .channe
 
 ## REST API
 
-When `api_port` is set in `config.yaml` (default: `0` = disabled), open-strix runs a loopback HTTP server for injecting events programmatically.
+When `api_port` is set in `config.yaml` (default: `0` = disabled), kynetic-agents runs a loopback HTTP server for injecting events programmatically.
 
 ### `POST /api/event`
 
@@ -333,7 +333,7 @@ The API binds to `127.0.0.1` only — not accessible from the network. For exter
 
 ## Local Web UI
 
-When `web_ui_port` is set in `config.yaml` (default: `0` = disabled), open-strix serves a built-in 1:1 chat UI.
+When `web_ui_port` is set in `config.yaml` (default: `0` = disabled), kynetic-agents serves a built-in 1:1 chat UI.
 
 ### `GET /`
 

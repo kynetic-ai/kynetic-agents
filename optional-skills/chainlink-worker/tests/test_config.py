@@ -33,8 +33,8 @@ class ConfigTests(unittest.TestCase):
                     worktree = true
                     branch_prefix = "chainlink/"
 
-                    [workers.open-strix]
-                    repo = "/tmp/repos/open-strix"
+                    [workers.kynetic-agents]
+                    repo = "/tmp/repos/kynetic-agents"
                     worktree = false
                     """
                 ).strip(),
@@ -49,7 +49,7 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(config.settings.max_codex_wait_seconds, 900)
             self.assertEqual(config.settings.agent_id, "backlog-worker")
             self.assertEqual(config.settings.rules_dir, Path("/tmp/rules"))
-            self.assertEqual([worker.name for worker in config.workers], ["data-lake-ml", "data-lake-ml-2", "open-strix"])
+            self.assertEqual([worker.name for worker in config.workers], ["data-lake-ml", "data-lake-ml-2", "kynetic-agents"])
             self.assertTrue(config.workers[0].worktree)
             self.assertFalse(config.workers[2].worktree)
             self.assertEqual(config.workers[0].branch_prefix, "chainlink/")
@@ -63,8 +63,8 @@ class ConfigTests(unittest.TestCase):
                     [settings]
                     chainlink_cwd = "/tmp/chainlink"
 
-                    [workers.open-strix]
-                    repo = "/tmp/repos/open-strix"
+                    [workers.kynetic-agents]
+                    repo = "/tmp/repos/kynetic-agents"
                     """
                 ).strip(),
                 encoding="utf-8",
@@ -95,7 +95,7 @@ class ConfigTests(unittest.TestCase):
             config_path.write_text(
                 textwrap.dedent(
                     """
-                    [workers.open-strix]
+                    [workers.kynetic-agents]
                     worktree = false
                     """
                 ).strip(),

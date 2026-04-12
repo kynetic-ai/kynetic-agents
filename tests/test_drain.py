@@ -8,19 +8,19 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from open_strix.models import AgentEvent
+from kynetic_agents.models import AgentEvent
 
 
 @pytest.fixture
 def app():
     """Create a minimal mock app for drain testing."""
-    with patch("open_strix.app.load_config"), \
-         patch("open_strix.app.load_dotenv"), \
-         patch("open_strix.app.bootstrap_home_repo"), \
-         patch("open_strix.app.load_phone_book", return_value={}), \
-         patch("open_strix.app.sync_builtin_skills_home"), \
-         patch("open_strix.app.Supervisor"):
-        from open_strix.app import OpenStrixApp
+    with patch("kynetic_agents.app.load_config"), \
+         patch("kynetic_agents.app.load_dotenv"), \
+         patch("kynetic_agents.app.bootstrap_home_repo"), \
+         patch("kynetic_agents.app.load_phone_book", return_value={}), \
+         patch("kynetic_agents.app.sync_builtin_skills_home"), \
+         patch("kynetic_agents.app.Supervisor"):
+        from kynetic_agents.app import OpenStrixApp
         app = object.__new__(OpenStrixApp)
         app.queue = asyncio.Queue()
         app._draining = False

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import open_strix.release as release_mod
+import kynetic_agents.release as release_mod
 
 
 def test_read_token_from_pypirc_reads_api_token(tmp_path: Path) -> None:

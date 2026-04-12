@@ -1,6 +1,6 @@
 # Setup Guide
 
-Detailed setup instructions for open-strix. For an overview of what open-strix is, see [README.md](README.md).
+Detailed setup instructions for kynetic-agents. For an overview of what kynetic-agents is, see [README.md](README.md).
 
 ## Prerequisites
 
@@ -47,12 +47,12 @@ Official docs: https://cli.github.com/
 ## Quick start
 
 ```bash
-uvx open-strix setup --home my-agent --github
+uvx kynetic-agents setup --home my-agent --github
 cd my-agent
-uv run open-strix
+uv run kynetic-agents
 ```
 
-`open-strix setup` bootstraps the target directory with:
+`kynetic-agents setup` bootstraps the target directory with:
 
 - `state/`, `skills/`, `blocks/` — agent workspace directories
 - `logs/events.jsonl`, `logs/chat-history.jsonl`, `logs/journal.jsonl` — event, chat transcript, and journal logs
@@ -63,12 +63,12 @@ uv run open-strix
 - `pyproject.toml`, `uv.lock` — Python dependencies
 
 It also:
-- Runs `uv init` and `uv add open-strix`
+- Runs `uv init` and `uv add kynetic-agents`
 - Checks git identity (prompts for `user.name` and `user.email` if missing)
 - Checks git remote (prompts for remote URL if `origin` is missing)
 - Detects OS and generates service files in `services/`:
-  - Linux: `open-strix.service` (systemd user unit)
-  - macOS: `ai.open-strix.<name>.plist` (launchd agent)
+  - Linux: `kynetic-agents.service` (systemd user unit)
+  - macOS: `ai.kynetic-agents.<name>.plist` (launchd agent)
   - Windows: Task Scheduler install/uninstall PowerShell scripts
 - Prints a CLI walkthrough with links for model and Discord setup
 
@@ -78,19 +78,19 @@ If you prefer a local project install instead of `uvx`:
 
 ```bash
 uv init --python 3.11
-uv add open-strix
-uv run open-strix setup --home .
-uv run open-strix
+uv add kynetic-agents
+uv run kynetic-agents setup --home .
+uv run kynetic-agents
 ```
 
 ## GitHub repo setup
 
-open-strix auto-syncs with git after each turn, so set up a repo + remote early. Keep it **private** — agent memory and logs can contain sensitive context.
+kynetic-agents auto-syncs with git after each turn, so set up a repo + remote early. Keep it **private** — agent memory and logs can contain sensitive context.
 
 **Recommended:**
 
 ```bash
-uvx open-strix setup --home my-agent --github
+uvx kynetic-agents setup --home my-agent --github
 ```
 
 **Manual fallback (GitHub CLI):**
@@ -177,14 +177,14 @@ Moonshot docs:
 
 ### Model config behavior
 
-- If `model` has no `:` (e.g., `MiniMax-M2.5`), open-strix treats it as Anthropic-provider: `anthropic:MiniMax-M2.5`
+- If `model` has no `:` (e.g., `MiniMax-M2.5`), kynetic-agents treats it as Anthropic-provider: `anthropic:MiniMax-M2.5`
 - If `model` includes `provider:model` (e.g., `openai:gpt-4o-mini`), it passes through unchanged
 
 Any model with an Anthropic-compatible API works. Just set `ANTHROPIC_BASE_URL` and `ANTHROPIC_API_KEY`.
 
 ## Choosing an interface
 
-open-strix supports two interfaces. You can use either or both.
+kynetic-agents supports two interfaces. You can use either or both.
 
 | | Web UI | Discord |
 |---|---|---|
@@ -197,7 +197,7 @@ open-strix supports two interfaces. You can use either or both.
 
 ## Web UI setup
 
-The web UI is **enabled by default** on port 8084. Run `uv run open-strix` and open `http://127.0.0.1:8084/`. Done.
+The web UI is **enabled by default** on port 8084. Run `uv run kynetic-agents` and open `http://127.0.0.1:8084/`. Done.
 
 The web UI supports text messages, image display, file attachments (drag, paste, or pick), and emoji reactions. It uses the same tools and memory as Discord — switching between them later doesn't lose anything.
 
@@ -243,7 +243,7 @@ Reference docs:
 - [Permissions](https://docs.discord.com/developers/topics/permissions)
 - [Gateway + intents](https://docs.discord.com/developers/events/gateway)
 
-Where this is configured in open-strix:
+Where this is configured in kynetic-agents:
 - Token env var name: `config.yaml` → `discord_token_env` (default `DISCORD_TOKEN`)
 - Bot allowlist: `config.yaml` → `always_respond_bot_ids`
 

@@ -6,8 +6,8 @@ from typing import Any
 
 import pytest
 
-import open_strix.app as app_mod
-from open_strix.phone_book import (
+import kynetic_agents.app as app_mod
+from kynetic_agents.phone_book import (
     PhoneBook,
     PhoneBookEntry,
     enrich_from_jsonl,
@@ -403,14 +403,14 @@ def test_lookup_tool_no_results(
 
 
 def test_phone_book_file_in_layout() -> None:
-    from open_strix.config import RepoLayout
+    from kynetic_agents.config import RepoLayout
 
     layout = RepoLayout(home=Path("/fake"), state_dir_name="state")
     assert layout.phone_book_file == Path("/fake/state/phone-book.md")
 
 
 def test_phone_book_extra_file_in_layout() -> None:
-    from open_strix.config import RepoLayout
+    from kynetic_agents.config import RepoLayout
 
     layout = RepoLayout(home=Path("/fake"), state_dir_name="state")
     assert layout.phone_book_extra_file == Path("/fake/state/phone-book.extra.md")
@@ -592,14 +592,14 @@ def test_render_aliases_block_bot_tag() -> None:
 
 
 def test_people_jsonl_in_layout() -> None:
-    from open_strix.config import RepoLayout
+    from kynetic_agents.config import RepoLayout
 
     layout = RepoLayout(home=Path("/fake"), state_dir_name="state")
     assert layout.people_jsonl == Path("/fake/state/people.jsonl")
 
 
 def test_channels_jsonl_in_layout() -> None:
-    from open_strix.config import RepoLayout
+    from kynetic_agents.config import RepoLayout
 
     layout = RepoLayout(home=Path("/fake"), state_dir_name="state")
     assert layout.channels_jsonl == Path("/fake/state/channels.jsonl")
@@ -635,7 +635,7 @@ def test_app_loads_jsonl_enrichment(
 
 def test_render_turn_prompt_includes_aliases() -> None:
     """render_turn_prompt includes aliases block when provided."""
-    from open_strix.prompts import render_turn_prompt
+    from kynetic_agents.prompts import render_turn_prompt
 
     result = render_turn_prompt(
         journal_entries=[],
@@ -651,7 +651,7 @@ def test_render_turn_prompt_includes_aliases() -> None:
 
 def test_render_turn_prompt_omits_aliases_when_empty() -> None:
     """render_turn_prompt skips aliases section when block is empty."""
-    from open_strix.prompts import render_turn_prompt
+    from kynetic_agents.prompts import render_turn_prompt
 
     result = render_turn_prompt(
         journal_entries=[],
@@ -739,7 +739,7 @@ def test_load_jsonl_warns_on_malformed(tmp_path: Path, caplog: pytest.LogCapture
     bad_file = tmp_path / "bad.jsonl"
     bad_file.write_text('{"good": true}\nnot json\n{"also_good": true}\n')
 
-    from open_strix.phone_book import _load_jsonl
+    from kynetic_agents.phone_book import _load_jsonl
     with caplog.at_level(logging.WARNING):
         records = _load_jsonl(bad_file)
     assert len(records) == 2

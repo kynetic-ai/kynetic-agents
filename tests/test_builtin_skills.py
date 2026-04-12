@@ -6,8 +6,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-from open_strix.builtin_skills import materialize_builtin_skills, sync_builtin_skills_home
-from open_strix.config import RepoLayout, STATE_DIR_NAME, bootstrap_home_repo
+from kynetic_agents.builtin_skills import materialize_builtin_skills, sync_builtin_skills_home
+from kynetic_agents.config import RepoLayout, STATE_DIR_NAME, bootstrap_home_repo
 
 
 def test_materialized_builtin_skills_include_prediction_review_assets() -> None:
@@ -30,7 +30,7 @@ def test_materialized_builtin_skills_include_prediction_review_assets() -> None:
     skill_text = skill_path.read_text(encoding="utf-8")
     assert "name: prediction-review" in skill_text
     assert "logs/events.jsonl" in skill_text
-    assert ".open_strix_builtin_skills/scripts/prediction_review_log.py" in skill_text
+    assert ".kynetic_agents_builtin_skills/scripts/prediction_review_log.py" in skill_text
 
     dashboard_text = memory_dashboard_path.read_text(encoding="utf-8")
     assert "matplotlib" in dashboard_text
@@ -44,11 +44,11 @@ def test_materialized_builtin_skills_include_prediction_review_assets() -> None:
     memory_skill_text = memory_skill_path.read_text(encoding="utf-8")
     assert "logs/journal.jsonl" in memory_skill_text
     assert "logs/events.jsonl" in memory_skill_text
-    assert "/.open_strix_builtin_skills/memory/maintenance.md" in memory_skill_text
+    assert "/.kynetic_agents_builtin_skills/memory/maintenance.md" in memory_skill_text
 
     maintenance_text = memory_maintenance_path.read_text(encoding="utf-8")
-    assert "./.open_strix_builtin_skills/scripts/memory_dashboard.py" in maintenance_text
-    assert "./.open_strix_builtin_skills/scripts/file_frequency_report.py" in maintenance_text
+    assert "./.kynetic_agents_builtin_skills/scripts/memory_dashboard.py" in maintenance_text
+    assert "./.kynetic_agents_builtin_skills/scripts/file_frequency_report.py" in maintenance_text
     assert "logs/events.jsonl" in maintenance_text
 
 
@@ -58,9 +58,9 @@ def test_prediction_review_logger_script_appends_structured_jsonl(tmp_path: Path
     layout = RepoLayout(home=home, state_dir_name=STATE_DIR_NAME)
     bootstrap_home_repo(layout, checkpoint_text="checkpoint")
 
-    logger_path = home / ".open_strix_builtin_skills" / "scripts" / "prediction_review_log.py"
-    memory_dashboard_path = home / ".open_strix_builtin_skills" / "scripts" / "memory_dashboard.py"
-    file_frequency_report_path = home / ".open_strix_builtin_skills" / "scripts" / "file_frequency_report.py"
+    logger_path = home / ".kynetic_agents_builtin_skills" / "scripts" / "prediction_review_log.py"
+    memory_dashboard_path = home / ".kynetic_agents_builtin_skills" / "scripts" / "memory_dashboard.py"
+    file_frequency_report_path = home / ".kynetic_agents_builtin_skills" / "scripts" / "file_frequency_report.py"
     assert logger_path.exists()
     assert memory_dashboard_path.exists()
     assert file_frequency_report_path.exists()
@@ -111,7 +111,7 @@ def test_memory_dashboard_script_prints_output_file_and_text_report(tmp_path: Pa
         encoding="utf-8",
     )
 
-    dashboard_script = home / ".open_strix_builtin_skills" / "scripts" / "memory_dashboard.py"
+    dashboard_script = home / ".kynetic_agents_builtin_skills" / "scripts" / "memory_dashboard.py"
     assert dashboard_script.exists()
 
     proc = subprocess.run(
@@ -186,7 +186,7 @@ def test_file_frequency_report_groups_file_access_by_session(tmp_path: Path) -> 
         for row in events:
             handle.write(json.dumps(row, ensure_ascii=True) + "\n")
 
-    script_path = home / ".open_strix_builtin_skills" / "scripts" / "file_frequency_report.py"
+    script_path = home / ".kynetic_agents_builtin_skills" / "scripts" / "file_frequency_report.py"
     assert script_path.exists()
 
     proc = subprocess.run(
@@ -260,7 +260,7 @@ def test_disable_builtin_skills_excludes_skill_from_sync(tmp_path: Path) -> None
 
     # Sync all skills first.
     sync_builtin_skills_home(root.parent, disabled_skills=None)
-    builtin_dir = root.parent / ".open_strix_builtin_skills"
+    builtin_dir = root.parent / ".kynetic_agents_builtin_skills"
     assert (builtin_dir / "skill-acquisition" / "SKILL.md").exists()
     assert (builtin_dir / "memory" / "SKILL.md").exists()
     assert (builtin_dir / "scripts" / "prediction_review_log.py").exists()
@@ -287,7 +287,7 @@ def test_disable_builtin_skills_via_bootstrap(tmp_path: Path) -> None:
         disabled_builtin_skills={"skill-acquisition"},
     )
 
-    builtin_dir = home / ".open_strix_builtin_skills"
+    builtin_dir = home / ".kynetic_agents_builtin_skills"
     assert not (builtin_dir / "skill-acquisition").exists()
     assert (builtin_dir / "memory" / "SKILL.md").exists()
     assert (builtin_dir / "scripts" / "prediction_review_log.py").exists()
@@ -299,7 +299,7 @@ def test_bootstrap_cleans_legacy_builtin_script_copies(tmp_path: Path) -> None:
     layout = RepoLayout(home=home, state_dir_name=STATE_DIR_NAME)
     bootstrap_home_repo(layout, checkpoint_text="checkpoint")
 
-    builtin_script = home / ".open_strix_builtin_skills" / "scripts" / "prediction_review_log.py"
+    builtin_script = home / ".kynetic_agents_builtin_skills" / "scripts" / "prediction_review_log.py"
     legacy_script = home / "scripts" / "prediction_review_log.py"
     legacy_script.write_text(builtin_script.read_text(encoding="utf-8"), encoding="utf-8")
     assert legacy_script.exists()

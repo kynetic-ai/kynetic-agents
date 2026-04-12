@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 from dotenv import load_dotenv
 
-import open_strix.app as app_mod
+import kynetic_agents.app as app_mod
 
 # Load repo-root .env so DISCORD_TOKEN is available during local test runs.
 load_dotenv(dotenv_path=Path(__file__).resolve().parents[1] / ".env", override=False)
@@ -38,7 +38,7 @@ async def _wait_for_ready(
         if run_task.done():
             # Surface startup errors immediately.
             await run_task
-            raise AssertionError("open-strix run task exited before Discord became ready")
+            raise AssertionError("kynetic-agents run task exited before Discord became ready")
         client = app.discord_client
         if client is not None and client.is_ready():
             return
@@ -47,7 +47,7 @@ async def _wait_for_ready(
 
 
 @pytest.mark.asyncio
-async def test_live_open_strix_connects_to_discord(
+async def test_live_kynetic_agents_connects_to_discord(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -87,7 +87,7 @@ async def test_live_send_message_tool_posts_to_channel(
         tools = {tool.name: tool for tool in app._build_tools()}
         result = await tools["send_message"].ainvoke(
             {
-                "text": f"[open-strix live test] {int(time.time())}",
+                "text": f"[kynetic-agents live test] {int(time.time())}",
                 "channel_id": channel_id,
             },
         )

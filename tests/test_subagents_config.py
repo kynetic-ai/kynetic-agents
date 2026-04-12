@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from open_strix.config import (
+from kynetic_agents.config import (
     AppConfig,
     RepoLayout,
     SubAgentConfig,

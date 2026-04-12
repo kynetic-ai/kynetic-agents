@@ -14,9 +14,9 @@ from typing import Any
 
 import pytest
 
-import open_strix.app as app_mod
-import open_strix.discord as discord_mod
-from open_strix.config import AppConfig, load_config, RepoLayout
+import kynetic_agents.app as app_mod
+import kynetic_agents.discord as discord_mod
+from kynetic_agents.config import AppConfig, load_config, RepoLayout
 
 
 # ---------------------------------------------------------------------------
@@ -561,7 +561,7 @@ class TestHomeChannelsScaffolding:
     def test_default_config_string_includes_home_channels(self) -> None:
         """DEFAULT_CONFIG must declare home_channels so new agents see the field."""
         import yaml as _yaml
-        from open_strix.config import DEFAULT_CONFIG
+        from kynetic_agents.config import DEFAULT_CONFIG
         parsed = _yaml.safe_load(DEFAULT_CONFIG)
         assert "home_channels" in parsed
         assert parsed["home_channels"] == []

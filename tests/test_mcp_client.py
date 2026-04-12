@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from open_strix.mcp_client import (
+from kynetic_agents.mcp_client import (
     MCPConnection,
     MCPManager,
     MCPServerConfig,
@@ -244,12 +244,12 @@ class TestMCPManager:
 
 class TestConfigIntegration:
     def test_appconfig_has_mcp_servers(self):
-        from open_strix.config import AppConfig
+        from kynetic_agents.config import AppConfig
         config = AppConfig()
         assert config.mcp_servers == []
 
     def test_load_config_with_mcp_servers(self, tmp_path):
-        from open_strix.config import RepoLayout, bootstrap_home_repo, load_config
+        from kynetic_agents.config import RepoLayout, bootstrap_home_repo, load_config
 
         layout = RepoLayout(home=tmp_path, state_dir_name="state")
         bootstrap_home_repo(layout, checkpoint_text="test")
@@ -270,7 +270,7 @@ class TestConfigIntegration:
         assert config.mcp_servers[0].name == "test"
 
     def test_load_config_without_mcp_servers(self, tmp_path):
-        from open_strix.config import RepoLayout, bootstrap_home_repo, load_config
+        from kynetic_agents.config import RepoLayout, bootstrap_home_repo, load_config
 
         layout = RepoLayout(home=tmp_path, state_dir_name="state")
         bootstrap_home_repo(layout, checkpoint_text="test")

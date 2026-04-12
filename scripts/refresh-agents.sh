@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# refresh-agents.sh — Check for new open-strix releases, update and restart agents.
+# refresh-agents.sh — Check for new kynetic-agents releases, update and restart agents.
 #
 # Intended to run as a root cron job (e.g. every 5 minutes):
-#   */5 * * * * /path/to/open-strix/scripts/refresh-agents.sh >> /var/log/open-strix-refresh.log 2>&1
+#   */5 * * * * /path/to/kynetic-agents/scripts/refresh-agents.sh >> /var/log/kynetic-agents-refresh.log 2>&1
 #
 # What it does:
-#   1. Check PyPI for the latest open-strix version (prerelease or stable)
+#   1. Check PyPI for the latest kynetic-agents version (prerelease or stable)
 #   2. Compare against each agent's installed version
 #   3. If newer: uv sync to pull it, then SIGQUIT the agent (graceful drain)
 #   4. systemd restarts the agent automatically (Restart=on-failure / Restart=always)
@@ -19,7 +19,7 @@ PRERELEASE="--prerelease=allow"  # Set to "" for stable-only
 
 # Agent directories and their systemd service names
 declare -A AGENTS=(
-    ["/home/botuser/open-buddy"]="open-strix"
+    ["/home/botuser/open-buddy"]="kynetic-agents"
     ["/home/botuser/jester"]="jester"
 )
 
@@ -34,7 +34,7 @@ get_pypi_version() {
     local result
     result=$(python3 -c "
 import urllib.request, json
-url = 'https://pypi.org/pypi/open-strix/json'
+url = 'https://pypi.org/pypi/kynetic-agents/json'
 data = json.loads(urllib.request.urlopen(url, timeout=10).read())
 versions = list(data['releases'].keys())
 # Sort by packaging logic
@@ -52,7 +52,7 @@ print(versions[-1] if versions else '')
 get_installed_version() {
     local agent_dir="$1"
     local result
-    result=$(cd "$agent_dir" && "$UV" pip show open-strix 2>/dev/null | grep '^Version:' | awk '{print $2}')
+    result=$(cd "$agent_dir" && "$UV" pip show kynetic-agents 2>/dev/null | grep '^Version:' | awk '{print $2}')
     echo "$result"
 }
 
@@ -62,7 +62,7 @@ if [ -z "$latest" ]; then
     exit 1
 fi
 
-log "Latest open-strix on PyPI: $latest"
+log "Latest kynetic-agents on PyPI: $latest"
 
 for agent_dir in "${!AGENTS[@]}"; do
     service="${AGENTS[$agent_dir]}"

@@ -1,6 +1,6 @@
 # Skills
 
-Skills are how open-strix agents learn new capabilities. A skill is a markdown file with a YAML header — no SDK, no compilation, no registration. Drop it in `skills/` and the agent picks it up.
+Skills are how kynetic-agents agents learn new capabilities. A skill is a markdown file with a YAML header — no SDK, no compilation, no registration. Drop it in `skills/` and the agent picks it up.
 
 ## How skills work
 
@@ -66,7 +66,7 @@ This is how tools teach agents to use them — the skill comes from the tool its
 
 ## Built-in skills
 
-open-strix ships with skills that teach the agent how to operate:
+kynetic-agents ships with skills that teach the agent how to operate:
 
 | Skill | What it does |
 |-------|-------------|
@@ -78,7 +78,7 @@ open-strix ships with skills that teach the agent how to operate:
 | **introspection** | Self-diagnosis from event logs — debugging, communication analysis, pattern detection |
 | **pollers** | Create and manage pollers — lightweight scripts for external awareness |
 
-Built-in skills are read-only and synced from the open-strix package. They live in `.open_strix_builtin_skills/` (gitignored) and are refreshed on every startup.
+Built-in skills are read-only and synced from the kynetic-agents package. They live in `.kynetic_agents_builtin_skills/` (gitignored) and are refreshed on every startup.
 
 Service-specific pollers are available from [ClawHub](https://clawhub.ai):
 
@@ -113,7 +113,7 @@ The wrapper SKILL.md teaches the agent *when* and *why* to use the capability. T
 
 ## The extensibility model
 
-The design is intentional: open-strix's core handles Discord, memory, scheduling, and the agent loop. Everything domain-specific lives in skills. This means:
+The design is intentional: kynetic-agents's core handles Discord, memory, scheduling, and the agent loop. Everything domain-specific lives in skills. This means:
 
 - **New capability = new markdown file.** No code changes, no deploys, no version bumps.
 - **Agents can extend themselves.** With skill-acquisition, an agent can search ClawHub, evaluate candidates, and install skills — all without human intervention.

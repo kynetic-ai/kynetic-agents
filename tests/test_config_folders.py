@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from open_strix.config import (
+from kynetic_agents.config import (
     DEFAULT_FOLDERS,
     DEFAULT_MODEL_MAX_RETRIES,
     AppConfig,
@@ -16,8 +16,8 @@ from open_strix.config import (
     bootstrap_home_repo,
     load_config,
 )
-from open_strix.app import WriteGuardBackend
-from open_strix.prompts import render_folders_section
+from kynetic_agents.app import WriteGuardBackend
+from kynetic_agents.prompts import render_folders_section
 
 
 class TestParseFolders:

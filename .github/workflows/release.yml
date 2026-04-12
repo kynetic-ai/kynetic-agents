@@ -107,4 +107,4 @@ jobs:
           $changelog
 
           ---
-          Published to [PyPI](https://pypi.org/project/open-strix/${{ steps.version.outputs.version }}/)."
+          Published to [PyPI](https://pypi.org/project/kynetic-agents/${{ steps.version.outputs.version }}/)."

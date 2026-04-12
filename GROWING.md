@@ -84,7 +84,7 @@ The failure mode is an agent that writes an impressive-sounding identity on day 
 
 ### Prediction calibration
 
-open-strix ships with a prediction-review skill. The agent makes predictions ("Tim will want edits on this draft," "this post will get 20 likes"), checks them later, and learns from the results.
+kynetic-agents ships with a prediction-review skill. The agent makes predictions ("Tim will want edits on this draft," "this post will get 20 likes"), checks them later, and learns from the results.
 
 This loop is how the agent calibrates its judgment. An agent that never makes predictions can't learn where it's wrong. But predictions only work if the agent actually revisits them — the scheduled prediction-review job handles this.
 
@@ -96,6 +96,6 @@ If you find yourself starting over: don't wipe everything. The git history is va
 
 ## The meta-point
 
-The reason this guide exists separately from the README is that growing an agent is a fundamentally different kind of work than installing software. You can set up open-strix in five minutes. You can't grow an agent in five minutes.
+The reason this guide exists separately from the README is that growing an agent is a fundamentally different kind of work than installing software. You can set up kynetic-agents in five minutes. You can't grow an agent in five minutes.
 
 The framework provides the bones — memory, scheduling, skills, self-diagnosis. But the agent's actual character, usefulness, and autonomy come from the conversations you have with it. The best agents aren't the most configured ones. They're the ones whose humans spent time talking to them.

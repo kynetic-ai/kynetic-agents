@@ -30,7 +30,7 @@ def test_onboarding_flow_bootstraps_expected_home_repo(tmp_path: Path) -> None:
 
     _run(["uv", "init", "--python", "3.11", "--no-readme"], cwd=home, env=env)
     _run(["uv", "add", "--editable", str(repo_root)], cwd=home, env=env)
-    first_run = _run(["uv", "run", "open-strix"], cwd=home, env=env, stdin="")
+    first_run = _run(["uv", "run", "kynetic-agents"], cwd=home, env=env, stdin="")
 
     assert "No Discord token configured. Running in stdin mode." in first_run.stdout
 
@@ -45,9 +45,9 @@ def test_onboarding_flow_bootstraps_expected_home_repo(tmp_path: Path) -> None:
         home / "config.yaml",
         home / "checkpoint.md",
         home / "scripts" / "pre_commit.py",
-        home / ".open_strix_builtin_skills" / "scripts" / "prediction_review_log.py",
-        home / ".open_strix_builtin_skills" / "scripts" / "memory_dashboard.py",
-        home / ".open_strix_builtin_skills" / "scripts" / "file_frequency_report.py",
+        home / ".kynetic_agents_builtin_skills" / "scripts" / "prediction_review_log.py",
+        home / ".kynetic_agents_builtin_skills" / "scripts" / "memory_dashboard.py",
+        home / ".kynetic_agents_builtin_skills" / "scripts" / "file_frequency_report.py",
         home / ".git" / "hooks" / "pre-commit",
         home / "blocks" / "init.yaml",
     ]
@@ -89,5 +89,5 @@ def test_onboarding_flow_bootstraps_expected_home_repo(tmp_path: Path) -> None:
     assert "onboarding" in init_block["text"].lower()
 
     # Second run should be idempotent and still work.
-    second_run = _run(["uv", "run", "open-strix"], cwd=home, env=env, stdin="")
+    second_run = _run(["uv", "run", "kynetic-agents"], cwd=home, env=env, stdin="")
     assert "No Discord token configured. Running in stdin mode." in second_run.stdout

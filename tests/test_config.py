@@ -43,7 +43,7 @@ agent_id = "night-shift"
 rules_dir = "~/rules"
 
 [repos]
-open-strix = "~/src/open-strix"
+kynetic-agents = "~/src/kynetic-agents"
 new-repo = "~/src/new-repo"
 """.strip(),
         encoding="utf-8",
@@ -58,7 +58,7 @@ new-repo = "~/src/new-repo"
     assert loaded.worker.max_codex_wait_seconds == 1200
     assert loaded.worker.agent_id == "night-shift"
     assert loaded.worker.rules_dir == Path("~/rules").expanduser()
-    assert loaded.repos["open-strix"] == Path("~/src/open-strix").expanduser()
+    assert loaded.repos["kynetic-agents"] == Path("~/src/kynetic-agents").expanduser()
     assert loaded.repos["new-repo"] == Path("~/src/new-repo").expanduser()
     assert "vera-prism" not in loaded.repos  # DEFAULT_REPOS is empty; only config entries
 

@@ -43,7 +43,7 @@ def make_config(tmp_path: Path) -> chainlink_worker_config.AppConfig:
             rules_dir=None,
         ),
         repos={
-            "open-strix": tmp_path / "open-strix",
+            "kynetic-agents": tmp_path / "kynetic-agents",
             "vera-prism": tmp_path / "vera-prism",
         },
         source_path=None,
@@ -55,7 +55,7 @@ def test_run_once_claims_issue_and_marks_ready_for_review(tmp_path: Path) -> Non
     issue = {
         "id": 50,
         "title": "Build chainlink backlog worker",
-        "description": "Lives in open-strix/optional-skills/chainlink-worker.",
+        "description": "Lives in kynetic-agents/optional-skills/chainlink-worker.",
         "status": "open",
         "priority": "high",
         "labels": ["infra"],
@@ -95,7 +95,7 @@ def test_run_once_claims_issue_and_marks_ready_for_review(tmp_path: Path) -> Non
     assert worker.state.phase == "awaiting_review"
     assert worker.state.session_name == "issue-50"
     assert worker.state.review_rounds == 0
-    assert worker.state.repo_path == config.repos["open-strix"]
+    assert worker.state.repo_path == config.repos["kynetic-agents"]
     assert runner.responses == []
 
 
@@ -104,7 +104,7 @@ def test_advance_current_issue_sends_review_feedback_to_same_session(tmp_path: P
     current_issue = {
         "id": 50,
         "title": "Build chainlink backlog worker",
-        "description": "Lives in open-strix/optional-skills/chainlink-worker.",
+        "description": "Lives in kynetic-agents/optional-skills/chainlink-worker.",
         "status": "open",
         "priority": "high",
         "labels": ["ready-for-review"],
@@ -135,7 +135,7 @@ def test_advance_current_issue_sends_review_feedback_to_same_session(tmp_path: P
 
     worker = chainlink_worker.ChainlinkWorker(config, command_runner=runner, sleep_fn=lambda _: None)
     worker.state.current_issue = {"id": 50}
-    worker.state.repo_path = config.repos["open-strix"]
+    worker.state.repo_path = config.repos["kynetic-agents"]
     worker.state.session_name = "issue-50"
     worker.state.phase = "awaiting_review"
     worker.state.last_comment_id = 0
@@ -177,7 +177,7 @@ def test_approval_comment_closes_issue_and_session(tmp_path: Path) -> None:
 
     worker = chainlink_worker.ChainlinkWorker(config, command_runner=runner, sleep_fn=lambda _: None)
     worker.state.current_issue = {"id": 50}
-    worker.state.repo_path = config.repos["open-strix"]
+    worker.state.repo_path = config.repos["kynetic-agents"]
     worker.state.session_name = "issue-50"
     worker.state.phase = "awaiting_review"
     worker.state.last_comment_id = 0
@@ -198,14 +198,14 @@ def test_resolve_repo_path_falls_back_to_issue_text(tmp_path: Path) -> None:
     issue = {
         "id": 50,
         "title": "Build chainlink backlog worker",
-        "description": "Lives in open-strix/optional-skills/chainlink-worker.",
+        "description": "Lives in kynetic-agents/optional-skills/chainlink-worker.",
         "labels": ["infra"],
         "milestone": None,
     }
 
     repo_path = worker.resolve_repo_path(issue)
 
-    assert repo_path == config.repos["open-strix"]
+    assert repo_path == config.repos["kynetic-agents"]
 
 
 def _json(payload: dict) -> str:

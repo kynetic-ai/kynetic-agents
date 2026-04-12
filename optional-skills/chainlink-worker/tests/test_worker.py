@@ -77,7 +77,7 @@ class WorkerAsyncTests(unittest.IsolatedAsyncioTestCase):
             prompt_dir=self.root / "p2",
         )
         worker_three = Worker(
-            WorkerConfig("open-strix", self.repo_b, False, "chainlink/"),
+            WorkerConfig("kynetic-agents", self.repo_b, False, "chainlink/"),
             self.settings,
             prompt_dir=self.root / "p3",
         )
@@ -85,7 +85,7 @@ class WorkerAsyncTests(unittest.IsolatedAsyncioTestCase):
 
         issue_one = {"id": 1, "labels": ["repo:data-lake-ml"], "title": "Fix data-lake-ml loader"}
         issue_two = {"id": 2, "labels": ["repo:data-lake-ml"], "title": "Fix data-lake-ml retry"}
-        issue_three = {"id": 3, "labels": [], "title": "Polish open-strix prompts", "description": "Touch open-strix"}
+        issue_three = {"id": 3, "labels": [], "title": "Polish kynetic-agents prompts", "description": "Touch kynetic-agents"}
 
         self.assertIs(poller.route_issue(issue_one), worker_one)
         self.assertIs(poller.route_issue(issue_two), worker_two)
@@ -97,7 +97,7 @@ class WorkerAsyncTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_stale_claim_reaper_reclaims_unowned_issue(self) -> None:
         worker = Worker(
-            WorkerConfig("open-strix", self.repo_b, False, "chainlink/"),
+            WorkerConfig("kynetic-agents", self.repo_b, False, "chainlink/"),
             self.settings,
             prompt_dir=self.root / "prompts",
         )
@@ -128,7 +128,7 @@ class WorkerAsyncTests(unittest.IsolatedAsyncioTestCase):
             agent_id="backlog-worker",
         )
         worker = Worker(
-            WorkerConfig("open-strix", self.repo_b, False, "chainlink/"),
+            WorkerConfig("kynetic-agents", self.repo_b, False, "chainlink/"),
             stale_settings,
             prompt_dir=self.root / "prompts",
         )
@@ -154,7 +154,7 @@ class WorkerAsyncTests(unittest.IsolatedAsyncioTestCase):
             "status": "open",
             "title": "Refactor worker",
             "description": "Make it async.",
-            "labels": ["repo:open-strix"],
+            "labels": ["repo:kynetic-agents"],
             "comments": [],
         }
         issue_after_initial = dict(issue, comments=[], labels=["ready-for-review"])
@@ -178,7 +178,7 @@ class WorkerAsyncTests(unittest.IsolatedAsyncioTestCase):
         )
 
         worker = Worker(
-            WorkerConfig("open-strix", self.repo_b, False, "chainlink/"),
+            WorkerConfig("kynetic-agents", self.repo_b, False, "chainlink/"),
             self.settings,
             prompt_dir=self.root / "prompts",
         )
@@ -234,7 +234,7 @@ class WorkerAsyncTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_graceful_shutdown_releases_current_issue(self) -> None:
         worker = Worker(
-            WorkerConfig("open-strix", self.repo_b, False, "chainlink/"),
+            WorkerConfig("kynetic-agents", self.repo_b, False, "chainlink/"),
             self.settings,
             prompt_dir=self.root / "prompts",
         )
@@ -262,7 +262,7 @@ class WorkerAsyncTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_worker_queue_processes_multiple_issues_in_sequence(self) -> None:
         worker = Worker(
-            WorkerConfig("open-strix", self.repo_b, False, "chainlink/"),
+            WorkerConfig("kynetic-agents", self.repo_b, False, "chainlink/"),
             self.settings,
             prompt_dir=self.root / "prompts",
         )

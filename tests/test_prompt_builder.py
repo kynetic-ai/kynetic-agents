@@ -19,7 +19,7 @@ def test_build_prompt_includes_issue_context() -> None:
         "id": 50,
         "title": "Build chainlink backlog worker",
         "description": "Create the worker and the review poller.",
-        "labels": ["infra", "open-strix"],
+        "labels": ["infra", "kynetic-agents"],
         "milestone": {
             "name": "Chainlink Backlog Worker",
             "description": "Phase 1 MVP",
@@ -41,15 +41,15 @@ def test_build_prompt_includes_issue_context() -> None:
 
     prompt = chainlink_worker_prompt_builder.build_prompt(
         issue,
-        "/repo/open-strix",
+        "/repo/kynetic-agents",
         rules=["# quality.md\nPrefer focused tests."],
     )
 
     assert "# Chainlink Issue #50: Build chainlink backlog worker" in prompt
-    assert "Repository path: `/repo/open-strix`" in prompt
+    assert "Repository path: `/repo/kynetic-agents`" in prompt
     assert "Create the worker and the review poller." in prompt
     assert "Chainlink Backlog Worker" in prompt
-    assert "`infra`, `open-strix`" in prompt
+    assert "`infra`, `kynetic-agents`" in prompt
     assert "#51 Build review poller" in prompt
     assert "Make sure the review loop reuses the same session." in prompt
     assert "Prefer focused tests." in prompt

@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from open_strix.scheduler import PollerConfig, SchedulerMixin
+from kynetic_agents.scheduler import PollerConfig, SchedulerMixin
 
 
 class FakeLayout:

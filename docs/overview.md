@@ -4,11 +4,11 @@ Claude Code. Here, we use LangGraph DeepAgents to construct a similar experience
 # The Home Repo
 This repo here is where the code exists. The home repo is somewhere else. This repo here is just a library with an entry point.
 
-A user would create a fresh open-strix agent by doing:
+A user would create a fresh kynetic-agents agent by doing:
 1. `mkdir new-agent`
 2. `uv init --python 3.11`
-3. `uv add open-strix`
-4. `uv run open-strix`
+3. `uv add kynetic-agents`
+4. `uv run kynetic-agents`
 
 From there, the repo structure is initialized, Git hooks are installed, and then the agent starts. The next
 time the agent starts without any initialization. When the agent starts, it connects to discord and subscribes to
@@ -96,7 +96,7 @@ what's going on.
 
 # Skills
 Skills are markdown files with YAML frontmatter. User skills live in `skills/`, built-in skills are synced from
-the package to `.open_strix_builtin_skills/` (gitignored, refreshed on startup).
+the package to `.kynetic_agents_builtin_skills/` (gitignored, refreshed on startup).
 
 Built-in skills: onboarding, memory, skill-creator, skill-acquisition, prediction-review, introspection.
 

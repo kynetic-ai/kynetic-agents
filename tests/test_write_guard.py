@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from open_strix.app import WriteGuardBackend
+from kynetic_agents.app import WriteGuardBackend
 
 
 @pytest.fixture
@@ -40,7 +40,7 @@ class TestIsWriteAllowed:
         assert backend._is_write_allowed("/scripts/pre_commit.py") is False
 
     def test_builtin_skills_blocked(self, backend: WriteGuardBackend) -> None:
-        assert backend._is_write_allowed("/.open_strix_builtin_skills/memory/SKILL.md") is False
+        assert backend._is_write_allowed("/.kynetic_agents_builtin_skills/memory/SKILL.md") is False
 
 
 class TestWriteBlocked:

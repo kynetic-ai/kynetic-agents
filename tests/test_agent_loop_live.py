@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from dotenv import load_dotenv
 
-import open_strix.app as app_mod
+import kynetic_agents.app as app_mod
 
 # Load repo-root .env so ANTHROPIC_API_KEY is available during local test runs.
 load_dotenv(dotenv_path=Path(__file__).resolve().parents[1] / ".env", override=False)

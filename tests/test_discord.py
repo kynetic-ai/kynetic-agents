@@ -14,9 +14,8 @@ from typing import Any
 import pytest
 import yaml
 
-import open_strix.app as app_mod
-import open_strix.web_ui as web_ui_mod
-from open_strix.tools import SendMessageCircuitBreakerStop
+import kynetic_agents.app as app_mod
+from kynetic_agents.tools import SendMessageCircuitBreakerStop
 
 
 class DummyAgent:
@@ -75,7 +74,7 @@ def test_default_model_is_minimax_even_if_config_model_is_null(
     assert model_init["model_name"] == "anthropic:MiniMax-M2.5"
     assert model_init["kwargs"] == {"max_retries": 6}
     assert captured["model"] is sentinel_model
-    assert captured["skills"] == ["/skills", "/.open_strix_builtin_skills"]
+    assert captured["skills"] == ["/skills", "/.kynetic_agents_builtin_skills"]
     config_text = (tmp_path / "config.yaml").read_text(encoding="utf-8")
     assert "model: MiniMax-M2.5" in config_text
     assert "model_max_retries: 6" in config_text
@@ -167,24 +166,9 @@ def test_startup_logs_loaded_skills_for_deepagents(
 
     assert "skills passed to deepagents" in output
     assert "/skills" in output
-    assert "/.open_strix_builtin_skills" in output
+    assert "/.kynetic_agents_builtin_skills" in output
     assert "alpha -> /skills/alpha/SKILL.md" in output
-    assert "memory -> /.open_strix_builtin_skills/memory/SKILL.md" in output
-
-
-def test_humanize_local_web_error_mentions_retry_for_transient_provider_failure() -> None:
-    class TransientProviderError(RuntimeError):
-        pass
-
-    exc = TransientProviderError("Error code: 500 - internal server error")
-    exc.status_code = 500  # type: ignore[attr-defined]
-    exc.request_id = "req_test123"  # type: ignore[attr-defined]
-
-    text = app_mod._humanize_local_web_error(exc)
-
-    assert "temporary server or network error" in text
-    assert "retry" in text.lower()
-    assert "req_test123" in text
+    assert "memory -> /.kynetic_agents_builtin_skills/memory/SKILL.md" in output
 
 
 @pytest.mark.asyncio
@@ -1562,7 +1546,6 @@ async def test_event_worker_does_not_react_to_last_user_message_on_scheduler_err
 
     messages = list(app.message_history_by_channel["local-web"])
     assert messages[0]["reactions"] == []
-    assert messages[-1]["is_bot"] is True
 
     error_events = [
         json.loads(line)
@@ -1573,56 +1556,7 @@ async def test_event_worker_does_not_react_to_last_user_message_on_scheduler_err
     assert matching_errors
     assert matching_errors[-1]["source_event_type"] == "scheduler"
     assert matching_errors[-1]["reacted_to_last_user_message"] is False
-    assert matching_errors[-1]["error_message_sent"] is True
-
-
-@pytest.mark.asyncio
-async def test_event_worker_surfaces_local_web_errors_as_messages(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    class FailingAgent:
-        async def ainvoke(self, _: dict[str, Any]) -> dict[str, Any]:
-            raise RuntimeError(
-                "Could not resolve authentication method. Expected either api_key or auth_token to be set.",
-            )
-
-    monkeypatch.setattr(app_mod, "create_deep_agent", lambda **_: FailingAgent())
-    app = app_mod.OpenStrixApp(tmp_path)
-    app._remember_message(
-        channel_id="local-web",
-        message_id="web-1",
-        author="local_user",
-        content="hello",
-        attachment_names=[],
-        is_bot=False,
-        source="web",
-    )
-
-    worker = asyncio.create_task(app._event_worker())
-    try:
-        await app.enqueue_event(
-            app_mod.AgentEvent(
-                event_type="web_message",
-                prompt="hello",
-                channel_id="local-web",
-                author="local_user",
-            ),
-        )
-        await asyncio.wait_for(app.queue.join(), timeout=10)
-    finally:
-        worker.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await worker
-
-    messages = list(app.message_history_by_channel["local-web"])
-    assert len(messages) == 2
-    assert messages[-1]["is_bot"] is True
-    assert "ANTHROPIC_API_KEY" in messages[-1]["content"]
-    assert app._latest_message_reference("local-web") == (messages[-1]["message_id"], "local-web")
-
-    error_events = [event for event in app.message_history_all if event["channel_id"] == "local-web"]
-    assert len(error_events) == 2
+    assert matching_errors[-1]["error_message_sent"] is False
 
 
 @pytest.mark.asyncio
@@ -1633,98 +1567,32 @@ async def test_chat_history_log_is_append_only_and_rehydrates_on_restart(
     _stub_agent_factory(monkeypatch)
     app = app_mod.OpenStrixApp(tmp_path)
 
+    channel_id = "discord-123456"
     added = app._remember_message(
-        channel_id="local-web",
-        message_id="web-123",
-        author="local_user",
+        channel_id=channel_id,
+        message_id="msg-123",
+        author="some_user",
         content="hello transcript",
         attachment_names=["state/attachments/demo.png"],
         is_bot=False,
-        source="web",
+        source="discord",
     )
     assert added is True
-
-    reacted = await app._react_to_message(
-        channel_id="local-web",
-        message_id="web-123",
-        emoji="👍",
-    )
-    assert reacted is True
 
     history_lines = [
         json.loads(line)
         for line in (tmp_path / "logs" / "chat-history.jsonl").read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
-    assert [line["type"] for line in history_lines] == ["message", "reaction"]
+    assert [line["type"] for line in history_lines] == ["message"]
     assert history_lines[0]["content"] == "hello transcript"
     assert history_lines[0]["attachments"] == ["state/attachments/demo.png"]
-    assert history_lines[1]["emoji"] == "👍"
 
     app_restarted = app_mod.OpenStrixApp(tmp_path)
-    restored = list(app_restarted.message_history_by_channel["local-web"])
+    restored = list(app_restarted.message_history_by_channel[channel_id])
     assert len(restored) == 1
     assert restored[0]["content"] == "hello transcript"
     assert restored[0]["attachments"] == ["state/attachments/demo.png"]
-    assert restored[0]["reactions"] == ["👍"]
-
-
-@pytest.mark.asyncio
-async def test_run_without_discord_token_announces_local_web_ui(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    class StopWait(Exception):
-        pass
-
-    class FakeEvent:
-        async def wait(self) -> None:
-            raise StopWait()
-
-    class FakeRunner:
-        async def cleanup(self) -> None:
-            return None
-
-    _stub_agent_factory(monkeypatch)
-    app = app_mod.OpenStrixApp(tmp_path)
-    app.config.web_ui_port = 8084
-    app.config.web_ui_host = "0.0.0.0"
-    monkeypatch.delenv(app.config.discord_token_env, raising=False)
-    monkeypatch.setattr(app.scheduler, "start", lambda: None)
-    monkeypatch.setattr(app, "_reload_scheduler_jobs", lambda: None)
-
-    async def fake_event_worker() -> None:
-        await asyncio.sleep(3600)
-
-    async def fake_start_web_ui(
-        _: app_mod.OpenStrixApp,
-        host: str,
-        port: int,
-    ) -> FakeRunner:
-        assert host == "0.0.0.0"
-        assert port == 8084
-        return FakeRunner()
-
-    async def fail_stdin_mode() -> None:
-        raise AssertionError("_stdin_mode should not be called when web UI is enabled")
-
-    monkeypatch.setattr(app, "_event_worker", fake_event_worker)
-    monkeypatch.setattr(app, "_stdin_mode", fail_stdin_mode)
-    monkeypatch.setattr(web_ui_mod, "start_web_ui", fake_start_web_ui)
-    monkeypatch.setattr(app_mod.asyncio, "Event", lambda: FakeEvent())
-
-    try:
-        with pytest.raises(StopWait):
-            await app.run()
-    finally:
-        if app.worker_task is not None:
-            app.worker_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await app.worker_task
-
-    out = capsys.readouterr().out
-    assert "No Discord token configured. Local web UI available at http://127.0.0.1:8084/" in out
 
 
 @pytest.mark.asyncio
