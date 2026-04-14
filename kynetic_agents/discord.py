@@ -163,7 +163,7 @@ class DiscordBridge(discord.Client):
 
     async def on_ready(self) -> None:
         print(
-            f"Open-Strix is operational and listening on Discord as {self.user}.",
+            f"Kynetic-Agents is operational and listening on Discord as {self.user}.",
             flush=True,
         )
         self._app.log_event("discord_ready", user=str(self.user))
