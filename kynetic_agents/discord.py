@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 import re
+import time
 from typing import Any
 
 import discord
@@ -23,6 +24,18 @@ WARNING_REACTION_EMOJI = "⚠️"
 # event fires per burst.  All messages are still stored in history, so the agent
 # sees the full context on its single consolidated turn.
 BOT_MESSAGE_COALESCE_SECONDS = 1.0
+
+# Typing-aware coalescing: when a user is actively typing in a channel the agent
+# waits before processing so it receives a complete message.  Discord typing
+# events have a ~10 s natural TTL; we use 11 s so a single event keeps the
+# window open for the full duration.  TYPING_POLL_INTERVAL controls how often
+# we check.  TYPING_SETTLE_SECONDS adds a small grace period after typing stops
+# (to let the final message arrive).  TYPING_MAX_WAIT_SECONDS is the hard cap —
+# the agent will process regardless of ongoing typing once this elapses.
+TYPING_EXPIRY_SECONDS = 11.0
+TYPING_POLL_INTERVAL = 0.5
+TYPING_SETTLE_SECONDS = 1.0
+TYPING_MAX_WAIT_SECONDS = 30.0
 
 
 def _utc_now_iso() -> str:
@@ -181,6 +194,17 @@ class DiscordBridge(discord.Client):
                 entries=len(self._app.phone_book.entries),
             )
 
+    async def on_typing(self, channel: Any, user: Any, when: Any) -> None:
+        # Ignore our own typing indicator — it would block the agent from
+        # processing events while it is itself composing a response.
+        bot_user = self.user
+        if bot_user is not None and getattr(user, "id", None) == getattr(bot_user, "id", None):
+            return
+        channel_id = str(getattr(channel, "id", ""))
+        user_id = str(getattr(user, "id", ""))
+        if channel_id and user_id:
+            self._app.record_typing(channel_id, user_id)
+
     async def on_message(self, message: discord.Message) -> None:
         author_id = getattr(message.author, "id", None)
         bot_user = self.user
@@ -297,6 +321,24 @@ class DiscordMixin:
             sent_chunks = len(chunks)
         return sent, sent_message_id, sent_chunks
 
+    def record_typing(self, channel_id: str, user_id: str) -> None:
+        """Record that *user_id* is currently typing in *channel_id*."""
+        channel_typing: Any = getattr(self, "_channel_typing", None)
+        if channel_typing is None:
+            return
+        channel_typing[channel_id][user_id] = time.monotonic()
+
+    def is_anyone_typing(self, channel_id: str) -> bool:
+        """Return True if any user has a live typing record for *channel_id*."""
+        channel_typing: Any = getattr(self, "_channel_typing", None)
+        if channel_typing is None:
+            return False
+        now = time.monotonic()
+        return any(
+            now - t < TYPING_EXPIRY_SECONDS
+            for t in channel_typing.get(channel_id, {}).values()
+        )
+
     async def handle_discord_message(self, message: discord.Message) -> None:
         await self._refresh_channel_history_from_discord(
             channel_id=str(message.channel.id),
@@ -356,17 +398,30 @@ class DiscordMixin:
             source_id=str(message.id),
         )
 
-        # Coalesce rapid-fire messages per channel (hub/spoke and human users).
-        # When multiple messages arrive in quick succession the agent would
-        # otherwise process each as a separate turn, producing redundant or
-        # cross-talking replies. Instead we debounce per channel: cancel any
-        # pending enqueue and restart the timer. Only the most recent event fires;
-        # all prior messages are already in history so the agent's context is
-        # still complete on its single consolidated turn.
+        # Coalesce rapid-fire messages per channel (hub/spoke and human users)
+        # and wait for active typing to finish before processing.
+        #
+        # Two mechanisms combine here:
+        #   1. Debounce — cancel + reschedule on each new message so only the
+        #      most recent event fires per burst.  Controlled by
+        #      BOT_MESSAGE_COALESCE_SECONDS.
+        #   2. Typing-aware hold — after any debounce delay, poll until nobody
+        #      is actively typing in the channel (up to TYPING_MAX_WAIT_SECONDS).
+        #
+        # Either mechanism alone can trigger a background task; if neither
+        # applies we enqueue synchronously so the caller can get_nowait().
         coalesce_tasks: dict[str, asyncio.Task] | None = getattr(
             self, "_channel_coalesce_tasks", None
         )
-        if coalesce_tasks is not None and event.channel_id and BOT_MESSAGE_COALESCE_SECONDS > 0:
+        is_typing_in_channel = bool(
+            event.channel_id and self.is_anyone_typing(event.channel_id)
+        )
+        use_background_task = bool(
+            coalesce_tasks is not None
+            and event.channel_id
+            and (BOT_MESSAGE_COALESCE_SECONDS > 0 or is_typing_in_channel)
+        )
+        if use_background_task:
             existing = coalesce_tasks.pop(event.channel_id, None)
             if existing is not None and not existing.done():
                 existing.cancel()
@@ -374,10 +429,30 @@ class DiscordMixin:
             async def _delayed_enqueue(
                 evt: AgentEvent = event, cid: str = event.channel_id
             ) -> None:
+                # Phase 1: debounce window
                 try:
-                    await asyncio.sleep(BOT_MESSAGE_COALESCE_SECONDS)
+                    if BOT_MESSAGE_COALESCE_SECONDS > 0:
+                        await asyncio.sleep(BOT_MESSAGE_COALESCE_SECONDS)
                 except asyncio.CancelledError:
                     return
+
+                # Phase 2: wait until nobody is typing in this channel
+                deadline = time.monotonic() + TYPING_MAX_WAIT_SECONDS
+                while self.is_anyone_typing(cid):
+                    if time.monotonic() >= deadline:
+                        break
+                    try:
+                        await asyncio.sleep(TYPING_POLL_INTERVAL)
+                    except asyncio.CancelledError:
+                        return
+
+                # Phase 3: brief settle so the final message can arrive
+                if TYPING_SETTLE_SECONDS > 0:
+                    try:
+                        await asyncio.sleep(TYPING_SETTLE_SECONDS)
+                    except asyncio.CancelledError:
+                        return
+
                 ct: dict[str, asyncio.Task] | None = getattr(
                     self, "_channel_coalesce_tasks", None
                 )

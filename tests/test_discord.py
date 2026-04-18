@@ -10,6 +10,7 @@ from pathlib import Path
 import threading
 from types import SimpleNamespace
 from typing import Any
+import unittest.mock as mock
 
 import pytest
 import yaml
@@ -1741,3 +1742,189 @@ async def test_process_event_does_not_send_final_text_when_agent_skips_send_mess
     )
 
     assert channel.sent == []
+
+
+# ---------------------------------------------------------------------------
+# Typing-aware event coalescing
+# ---------------------------------------------------------------------------
+
+def _make_discord_message(
+    *,
+    channel_id: int = 999,
+    author_id: int = 1,
+    author_bot: bool = False,
+    content: str = "hello",
+) -> Any:
+    """Minimal fake discord.Message for typing-aware coalescing tests."""
+
+    class FakeAuthor:
+        bot = author_bot
+        id = author_id
+
+        def __str__(self) -> str:
+            return f"user-{author_id}"
+
+    return SimpleNamespace(
+        id=channel_id * 10000 + author_id,
+        content=content,
+        channel=SimpleNamespace(id=channel_id, name=f"channel-{channel_id}"),
+        author=FakeAuthor(),
+        attachments=[],
+        mentions=[],
+    )
+
+
+async def _cancel_coalesce_tasks(app: Any) -> None:
+    """Cancel all pending coalesce tasks and await their cleanup."""
+    for task in list(app._channel_coalesce_tasks.values()):
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+    app._channel_coalesce_tasks.clear()
+
+
+@pytest.mark.asyncio
+async def test_typing_delays_event_processing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Agent does not enqueue an event while a user is actively typing in the same channel."""
+    _stub_agent_factory(monkeypatch)
+    monkeypatch.setattr("kynetic_agents.discord.BOT_MESSAGE_COALESCE_SECONDS", 0.0)
+    monkeypatch.setattr("kynetic_agents.discord.TYPING_EXPIRY_SECONDS", 10.0)
+    monkeypatch.setattr("kynetic_agents.discord.TYPING_MAX_WAIT_SECONDS", 10.0)
+    monkeypatch.setattr("kynetic_agents.discord.TYPING_SETTLE_SECONDS", 0.0)
+    monkeypatch.setattr("kynetic_agents.discord.TYPING_POLL_INTERVAL", 0.02)
+
+    app = app_mod.OpenStrixApp(tmp_path)
+    app.record_typing("999", "user-42")
+
+    await app.handle_discord_message(_make_discord_message(channel_id=999))
+    await asyncio.sleep(0.1)  # well within the 10 s typing window
+
+    try:
+        assert app.queue.empty(), "Agent should not enqueue while a user is typing"
+    finally:
+        await _cancel_coalesce_tasks(app)
+
+
+@pytest.mark.asyncio
+async def test_event_enqueued_after_typing_stops(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Agent enqueues the event promptly once typing activity has stopped."""
+    _stub_agent_factory(monkeypatch)
+    monkeypatch.setattr("kynetic_agents.discord.BOT_MESSAGE_COALESCE_SECONDS", 0.0)
+    monkeypatch.setattr("kynetic_agents.discord.TYPING_EXPIRY_SECONDS", 0.1)
+    monkeypatch.setattr("kynetic_agents.discord.TYPING_MAX_WAIT_SECONDS", 5.0)
+    monkeypatch.setattr("kynetic_agents.discord.TYPING_SETTLE_SECONDS", 0.0)
+    monkeypatch.setattr("kynetic_agents.discord.TYPING_POLL_INTERVAL", 0.02)
+
+    app = app_mod.OpenStrixApp(tmp_path)
+    app.record_typing("999", "user-42")
+
+    await app.handle_discord_message(_make_discord_message(channel_id=999))
+
+    event = await asyncio.wait_for(app.queue.get(), timeout=2.0)
+    assert event.event_type == "discord_message"
+    assert event.channel_id == "999"
+
+
+@pytest.mark.asyncio
+async def test_hard_cap_enqueues_despite_ongoing_typing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Agent enqueues after the maximum wait even when typing is still active."""
+    _stub_agent_factory(monkeypatch)
+    monkeypatch.setattr("kynetic_agents.discord.BOT_MESSAGE_COALESCE_SECONDS", 0.0)
+    monkeypatch.setattr("kynetic_agents.discord.TYPING_EXPIRY_SECONDS", 10.0)  # stays active
+    monkeypatch.setattr("kynetic_agents.discord.TYPING_MAX_WAIT_SECONDS", 0.1)  # short cap
+    monkeypatch.setattr("kynetic_agents.discord.TYPING_SETTLE_SECONDS", 0.0)
+    monkeypatch.setattr("kynetic_agents.discord.TYPING_POLL_INTERVAL", 0.02)
+
+    app = app_mod.OpenStrixApp(tmp_path)
+    app.record_typing("999", "user-42")
+
+    await app.handle_discord_message(_make_discord_message(channel_id=999))
+
+    event = await asyncio.wait_for(app.queue.get(), timeout=2.0)
+    assert event.event_type == "discord_message"
+
+
+@pytest.mark.asyncio
+async def test_typing_in_other_channel_does_not_delay(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Typing activity in a different channel does not delay processing in this channel."""
+    _stub_agent_factory(monkeypatch)
+    monkeypatch.setattr("kynetic_agents.discord.BOT_MESSAGE_COALESCE_SECONDS", 0.0)
+    monkeypatch.setattr("kynetic_agents.discord.TYPING_EXPIRY_SECONDS", 10.0)
+    monkeypatch.setattr("kynetic_agents.discord.TYPING_MAX_WAIT_SECONDS", 10.0)
+    monkeypatch.setattr("kynetic_agents.discord.TYPING_SETTLE_SECONDS", 0.0)
+
+    app = app_mod.OpenStrixApp(tmp_path)
+    app.record_typing("888", "user-42")  # typing in a different channel
+
+    await app.handle_discord_message(_make_discord_message(channel_id=999))
+
+    assert not app.queue.empty(), "Typing in another channel must not delay this channel"
+    event = app.queue.get_nowait()
+    assert event.channel_id == "999"
+
+
+@pytest.mark.asyncio
+async def test_multiple_typists_all_must_stop_before_processing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Agent waits until every active typist in the channel has stopped, not just the first."""
+    _stub_agent_factory(monkeypatch)
+    monkeypatch.setattr("kynetic_agents.discord.BOT_MESSAGE_COALESCE_SECONDS", 0.0)
+    monkeypatch.setattr("kynetic_agents.discord.TYPING_EXPIRY_SECONDS", 0.2)
+    monkeypatch.setattr("kynetic_agents.discord.TYPING_MAX_WAIT_SECONDS", 5.0)
+    monkeypatch.setattr("kynetic_agents.discord.TYPING_SETTLE_SECONDS", 0.0)
+    monkeypatch.setattr("kynetic_agents.discord.TYPING_POLL_INTERVAL", 0.02)
+
+    app = app_mod.OpenStrixApp(tmp_path)
+    app.record_typing("999", "user-42")  # expires at T≈0.20 s
+
+    await app.handle_discord_message(_make_discord_message(channel_id=999))
+
+    # Record user-43 slightly later so it expires after user-42
+    await asyncio.sleep(0.05)
+    app.record_typing("999", "user-43")  # expires at T≈0.25 s
+
+    # At T≈0.22 s: user-42 gone, user-43 still active → must still be waiting
+    await asyncio.sleep(0.17)
+    assert app.queue.empty(), "Should still wait while user-43 is typing"
+
+    # Let user-43 expire and the agent process
+    event = await asyncio.wait_for(app.queue.get(), timeout=2.0)
+    assert event.event_type == "discord_message"
+
+
+@pytest.mark.asyncio
+async def test_on_typing_from_bot_itself_is_not_tracked(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The agent's own typing indicator is not recorded as blocking activity."""
+    _stub_agent_factory(monkeypatch)
+    app = app_mod.OpenStrixApp(tmp_path)
+    bridge = app_mod.DiscordBridge(app)
+
+    bot_id = 55555
+    with mock.patch.object(
+        app_mod.DiscordBridge, "user", new_callable=mock.PropertyMock
+    ) as mock_user:
+        mock_user.return_value = SimpleNamespace(id=bot_id)
+        await bridge.on_typing(
+            SimpleNamespace(id=999),       # channel
+            SimpleNamespace(id=bot_id),    # the bot itself is typing
+            datetime.now(timezone.utc),
+        )
+
+    assert not app.is_anyone_typing("999"), "Bot's own typing must not be tracked"

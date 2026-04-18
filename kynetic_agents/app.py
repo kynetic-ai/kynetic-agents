@@ -329,6 +329,7 @@ class OpenStrixApp(DiscordMixin, SchedulerMixin, ToolsMixin):
         self.fetch_cache_dir = Path(tempfile.mkdtemp(prefix="fetch-cache-", dir=self.layout.logs_dir))
 
         self._channel_coalesce_tasks: dict[str, asyncio.Task[Any]] = {}
+        self._channel_typing: dict[str, dict[str, float]] = defaultdict(dict)
         self.discord_client: DiscordBridge | None = None
         self.api_runner: Any | None = None
         self.worker_task: asyncio.Task[Any] | None = None
