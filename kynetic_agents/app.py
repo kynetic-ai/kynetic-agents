@@ -328,6 +328,7 @@ class OpenStrixApp(DiscordMixin, SchedulerMixin, ToolsMixin):
         # Session-scoped cache for fetched web content; cleaned up on shutdown.
         self.fetch_cache_dir = Path(tempfile.mkdtemp(prefix="fetch-cache-", dir=self.layout.logs_dir))
 
+        self._channel_coalesce_tasks: dict[str, asyncio.Task[Any]] = {}
         self.discord_client: DiscordBridge | None = None
         self.api_runner: Any | None = None
         self.worker_task: asyncio.Task[Any] | None = None
@@ -746,47 +747,58 @@ class OpenStrixApp(DiscordMixin, SchedulerMixin, ToolsMixin):
             self.current_event_label = event.scheduler_name or event.event_type
             self.current_turn_start = time.monotonic()
             try:
-                await self._process_event(event)
-                self._last_turn_failure = None
-            except SendMessageCircuitBreakerStop as exc:
-                self._last_turn_failure = (
-                    "Your previous turn was terminated by the send_message circuit breaker "
-                    "(repeated near-duplicate messages). Before retrying, reflect on what "
-                    "caused the loop. Consider using the five-whys skill to find the root "
-                    "cause before attempting a different approach."
-                )
-                self.log_event(
-                    "warning",
-                    where="event_worker",
-                    warning_type="send_message_loop_hard_stop",
-                    source_event_type=event.event_type,
-                    channel_id=event.channel_id,
-                    error=str(exc),
-                    **_error_log_fields(exc),
-                )
-            except Exception as exc:
-                self._last_turn_failure = (
-                    f"Your previous turn ended with an error: {type(exc).__name__}: {exc}. "
-                    "Before retrying, reflect on what went wrong. If this is a recurring "
-                    "failure, consider using the five-whys skill to find the structural cause."
-                )
-                reacted = False
-                if _should_react_to_error(event):
-                    reacted = await self._react_to_latest_message(
-                        channel_id=event.channel_id,
-                        emoji=ERROR_REACTION_EMOJI,
-                        include_bot=False,
-                    )
-                error_message_sent = False
-                self.log_event(
-                    "error",
-                    where="event_worker",
-                    source_event_type=event.event_type,
-                    error=str(exc),
-                    reacted_to_last_user_message=reacted,
-                    error_message_sent=error_message_sent,
-                    **_error_log_fields(exc),
-                )
+                async with self._typing_indicator(event):
+                    try:
+                        await self._process_event(event)
+                        self._last_turn_failure = None
+                    except SendMessageCircuitBreakerStop as exc:
+                        self._last_turn_failure = (
+                            "Your previous turn was terminated by the send_message circuit breaker "
+                            "(repeated near-duplicate messages). Before retrying, reflect on what "
+                            "caused the loop. Consider using the five-whys skill to find the root "
+                            "cause before attempting a different approach."
+                        )
+                        self.log_event(
+                            "warning",
+                            where="event_worker",
+                            warning_type="send_message_loop_hard_stop",
+                            source_event_type=event.event_type,
+                            channel_id=event.channel_id,
+                            error=str(exc),
+                            **_error_log_fields(exc),
+                        )
+                    except Exception as exc:
+                        self._last_turn_failure = (
+                            f"Your previous turn ended with an error: {type(exc).__name__}: {exc}. "
+                            "Before retrying, reflect on what went wrong. If this is a recurring "
+                            "failure, consider using the five-whys skill to find the structural cause."
+                        )
+                        reacted = False
+                        if _should_react_to_error(event):
+                            reacted = await self._react_to_latest_message(
+                                channel_id=event.channel_id,
+                                emoji=ERROR_REACTION_EMOJI,
+                                include_bot=False,
+                            )
+                        error_message_sent = False
+                        if event.channel_id:
+                            try:
+                                await self._send_channel_message(
+                                    channel_id=event.channel_id,
+                                    text="⚠️ I ran into an error and couldn't complete that request. Please try again.",
+                                )
+                                error_message_sent = True
+                            except Exception:
+                                pass
+                        self.log_event(
+                            "error",
+                            where="event_worker",
+                            source_event_type=event.event_type,
+                            error=str(exc),
+                            reacted_to_last_user_message=reacted,
+                            error_message_sent=error_message_sent,
+                            **_error_log_fields(exc),
+                        )
             finally:
                 if event.dedupe_key:
                     self.pending_scheduler_keys.discard(event.dedupe_key)
@@ -824,8 +836,7 @@ class OpenStrixApp(DiscordMixin, SchedulerMixin, ToolsMixin):
             scheduler_name=event.scheduler_name,
         )
         try:
-            async with self._typing_indicator(event):
-                result = await self.agent.ainvoke({"messages": [HumanMessage(content=prompt)]})
+            result = await self.agent.ainvoke({"messages": [HumanMessage(content=prompt)]})
             self._log_agent_trace(result)
             self._write_session_log(event, prompt, result)
 
@@ -852,10 +863,9 @@ class OpenStrixApp(DiscordMixin, SchedulerMixin, ToolsMixin):
                     broken_blocks=[e.split(":")[0] for e in block_errors],
                     error_count=len(block_errors),
                 )
-                async with self._typing_indicator(event):
-                    result = await self.agent.ainvoke(
-                        {"messages": [HumanMessage(content=repair_prompt)]}
-                    )
+                result = await self.agent.ainvoke(
+                    {"messages": [HumanMessage(content=repair_prompt)]}
+                )
                 self._log_agent_trace(result)
                 # Check again — log but don't loop
                 remaining_errors = self._validate_memory_blocks()

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 import json
@@ -17,6 +18,11 @@ DISCORD_MESSAGE_CHAR_LIMIT = 2000
 DISCORD_HISTORY_REFRESH_LIMIT = 50
 ERROR_REACTION_EMOJI = "❌"
 WARNING_REACTION_EMOJI = "⚠️"
+# Seconds to wait before queuing a bot-authored message. If another bot message
+# for the same channel arrives within this window the timer resets, so only one
+# event fires per burst.  All messages are still stored in history, so the agent
+# sees the full context on its single consolidated turn.
+BOT_MESSAGE_COALESCE_SECONDS = 1.0
 
 
 def _utc_now_iso() -> str:
@@ -337,20 +343,51 @@ class DiscordMixin:
             source_id=str(message.id),
             content=prompt,
         )
-        await self.enqueue_event(
-            AgentEvent(
-                event_type="discord_message",
-                prompt=prompt,
-                channel_id=str(message.channel.id),
-                channel_name=channel_name,
-                channel_conversation_type=channel_conversation_type,
-                channel_visibility=channel_visibility,
-                author=str(message.author),
-                author_id=author_id,
-                attachment_names=attachment_names,
-                source_id=str(message.id),
-            ),
+        event = AgentEvent(
+            event_type="discord_message",
+            prompt=prompt,
+            channel_id=str(message.channel.id),
+            channel_name=channel_name,
+            channel_conversation_type=channel_conversation_type,
+            channel_visibility=channel_visibility,
+            author=str(message.author),
+            author_id=author_id,
+            attachment_names=attachment_names,
+            source_id=str(message.id),
         )
+
+        # Coalesce rapid-fire messages per channel (hub/spoke and human users).
+        # When multiple messages arrive in quick succession the agent would
+        # otherwise process each as a separate turn, producing redundant or
+        # cross-talking replies. Instead we debounce per channel: cancel any
+        # pending enqueue and restart the timer. Only the most recent event fires;
+        # all prior messages are already in history so the agent's context is
+        # still complete on its single consolidated turn.
+        coalesce_tasks: dict[str, asyncio.Task] | None = getattr(
+            self, "_channel_coalesce_tasks", None
+        )
+        if coalesce_tasks is not None and event.channel_id and BOT_MESSAGE_COALESCE_SECONDS > 0:
+            existing = coalesce_tasks.pop(event.channel_id, None)
+            if existing is not None and not existing.done():
+                existing.cancel()
+
+            async def _delayed_enqueue(
+                evt: AgentEvent = event, cid: str = event.channel_id
+            ) -> None:
+                try:
+                    await asyncio.sleep(BOT_MESSAGE_COALESCE_SECONDS)
+                except asyncio.CancelledError:
+                    return
+                ct: dict[str, asyncio.Task] | None = getattr(
+                    self, "_channel_coalesce_tasks", None
+                )
+                if ct is not None:
+                    ct.pop(cid, None)
+                await self.enqueue_event(evt)
+
+            coalesce_tasks[event.channel_id] = asyncio.create_task(_delayed_enqueue())
+        else:
+            await self.enqueue_event(event)
 
     async def _refresh_channel_history_from_discord(
         self,

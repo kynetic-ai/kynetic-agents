@@ -217,6 +217,7 @@ async def test_handle_discord_message_queues_event_and_saves_attachments(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _stub_agent_factory(monkeypatch)
+    monkeypatch.setattr("kynetic_agents.discord.BOT_MESSAGE_COALESCE_SECONDS", 0)
     app = app_mod.OpenStrixApp(tmp_path)
 
     class FakeAttachment:
@@ -367,6 +368,7 @@ async def test_handle_discord_message_sets_dm_context_fields(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _stub_agent_factory(monkeypatch)
+    monkeypatch.setattr("kynetic_agents.discord.BOT_MESSAGE_COALESCE_SECONDS", 0)
     app = app_mod.OpenStrixApp(tmp_path)
 
     class FakeAuthor:
@@ -401,6 +403,7 @@ async def test_handle_discord_message_from_allowlisted_bot_is_processed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _stub_agent_factory(monkeypatch)
+    monkeypatch.setattr("kynetic_agents.discord.BOT_MESSAGE_COALESCE_SECONDS", 0)
     (tmp_path / "config.yaml").write_text(
         "always_respond_bot_ids:\n"
         "  - 42\n",
@@ -1556,7 +1559,7 @@ async def test_event_worker_does_not_react_to_last_user_message_on_scheduler_err
     assert matching_errors
     assert matching_errors[-1]["source_event_type"] == "scheduler"
     assert matching_errors[-1]["reacted_to_last_user_message"] is False
-    assert matching_errors[-1]["error_message_sent"] is False
+    assert matching_errors[-1]["error_message_sent"] is True
 
 
 @pytest.mark.asyncio
@@ -1647,15 +1650,24 @@ async def test_process_event_turn_enables_discord_typing_indicator(
             return {"messages": []}
 
     app.agent = FakeAgent()
-    await app._process_event(
-        app_mod.AgentEvent(
-            event_type="discord_message",
-            prompt="hello",
-            channel_id="123",
-            author="alice",
-            source_id="999",
-        ),
-    )
+
+    # Typing indicator now lives in _event_worker, not _process_event directly.
+    worker = asyncio.create_task(app._event_worker())
+    try:
+        await app.enqueue_event(
+            app_mod.AgentEvent(
+                event_type="discord_message",
+                prompt="hello",
+                channel_id="123",
+                author="alice",
+                source_id="999",
+            ),
+        )
+        await asyncio.wait_for(app.queue.join(), timeout=10)
+    finally:
+        worker.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await worker
 
     assert observed["typing_active_during_ainvoke"] is True
     assert channel.typing_entered == 1
