@@ -830,12 +830,30 @@ class OpenStrixApp(DiscordMixin, SchedulerMixin, ToolsMixin):
             self._write_session_log(event, prompt, result)
 
             final_text = self._extract_final_text(result)
-            self.log_event(
-                "agent_final_message_discarded",
-                source_event_type=event.event_type,
-                channel_id=event.channel_id,
-                final_text=final_text,
-            )
+            sent_via_tool = bool(self._current_turn_sent_messages)
+            if (
+                not sent_via_tool
+                and final_text.strip()
+                and event.channel_id
+                and event.scheduler_name is None
+            ):
+                await self._send_channel_message(
+                    channel_id=event.channel_id,
+                    text=final_text,
+                )
+                self.log_event(
+                    "agent_final_message_fallback_sent",
+                    source_event_type=event.event_type,
+                    channel_id=event.channel_id,
+                    final_text=final_text,
+                )
+            else:
+                self.log_event(
+                    "agent_final_message_discarded",
+                    source_event_type=event.event_type,
+                    channel_id=event.channel_id,
+                    final_text=final_text,
+                )
 
             # Post-turn hook: validate memory blocks and let agent self-correct
             block_errors = self._validate_memory_blocks()
