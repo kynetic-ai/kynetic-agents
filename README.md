@@ -80,6 +80,41 @@ Two layers:
 
 No embeddings, no vector search. Just files and git.
 
+#### Shared semantic memory with mempalace
+
+For multi-agent deployments, agents can share a common semantic memory store backed by [mempalace](https://github.com/mempalace/mempalace). This allows any agent to semantically search the conversation history of a shared channel — retrieving relevant past messages without knowing which file to read.
+
+**Architecture:** One designated process runs the writer (a singleton background coroutine that ingests messages into the palace). All other processes connect to the same store as read-only clients. This prevents write contention across processes.
+
+**Config fields:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `mempalace_path` | string | Yes, if using mempalace | Absolute path to the shared palace directory. Must be the same path across all processes. |
+| `mempalace_channels` | list of strings | Yes, if using mempalace | Channels to monitor and expose for search. Accepts channel IDs or names (same format as `home_channels`). |
+| `mempalace_writer` | bool | No (default: `false`) | Set to `true` in exactly one process. That process runs the writer coroutine that ingests messages into the palace. All other processes are read-only. |
+
+**Writer process** (`config.yaml`):
+```yaml
+mempalace_path: /shared/palace
+mempalace_writer: true
+mempalace_channels:
+  - "1234567890123456789"   # channel ID
+  - general                 # or channel name
+```
+
+**All other processes** (`config.yaml`):
+```yaml
+mempalace_path: /shared/palace
+mempalace_channels:
+  - "1234567890123456789"
+  - general
+```
+
+When `mempalace_path` is set, agents automatically receive six read-only search tools: `mempalace_search`, `mempalace_get_drawer`, `mempalace_kg_query`, `mempalace_kg_timeline`, `mempalace_get_taxonomy`, and `mempalace_list_drawers`. Write tools are never exposed to agents.
+
+Only new messages are written to the palace — chat history replayed from disk on restart is not re-ingested.
+
 ### Skills
 
 A skill is a markdown file in `skills/` with a YAML header. The agent sees all skills in its prompt and invokes them by name.
@@ -148,6 +183,11 @@ discord_token_env: DISCORD_TOKEN
 always_respond_bot_ids: []
 home_channels: []
 api_port: 0
+
+# Shared semantic memory (optional — see Memory section)
+mempalace_path: /shared/palace
+mempalace_writer: false
+mempalace_channels: []
 ```
 
 Models use the Anthropic-compatible API format. MiniMax M2.5 and Kimi K2.5 both work out of the box. Any model with an Anthropic-compatible endpoint will work — set `ANTHROPIC_BASE_URL` and `ANTHROPIC_API_KEY` in `.env`.
