@@ -1061,7 +1061,7 @@ class OpenStrixApp(DiscordMixin, SchedulerMixin, ToolsMixin):
                 MCPServerConfig(
                     name="mempalace",
                     command="python",
-                    args=["-m", "mempalace.mcp_server", "--path", self.config.mempalace_path],
+                    args=["-m", "mempalace.mcp_server", "--palace", self.config.mempalace_path],
                     allowed_tools=MEMPALACE_READ_TOOLS,
                 ),
                 *effective_mcp_servers,
