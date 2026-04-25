@@ -570,15 +570,34 @@ class DiscordMixin:
             except ValueError:
                 return False
 
-            channel = self.discord_client.get_channel(channel_int)
-            if channel is None:
-                channel = await self.discord_client.fetch_channel(channel_int)
-            if not hasattr(channel, "fetch_message"):
-                return False
+            try:
+                channel = self.discord_client.get_channel(channel_int)
+                if channel is None:
+                    channel = await self.discord_client.fetch_channel(channel_int)
+                if not hasattr(channel, "fetch_message"):
+                    return False
 
-            message = await channel.fetch_message(message_int)
-            await message.add_reaction(emoji)
-            reacted = True
+                message = await channel.fetch_message(message_int)
+                await message.add_reaction(emoji)
+                reacted = True
+            except discord.Forbidden:
+                self.log_event(
+                    "reaction_forbidden",
+                    channel_id=channel_id,
+                    message_id=message_id,
+                    emoji=emoji,
+                )
+                return False
+            except discord.HTTPException as exc:
+                self.log_event(
+                    "reaction_http_error",
+                    channel_id=channel_id,
+                    message_id=message_id,
+                    emoji=emoji,
+                    status=exc.status,
+                    error_code=exc.code,
+                )
+                return False
 
         if not reacted:
             return False

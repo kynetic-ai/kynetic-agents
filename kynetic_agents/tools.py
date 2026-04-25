@@ -1147,14 +1147,36 @@ class ToolsMixin:
             except ValueError:
                 return "channel_id and message_id must be numeric Discord IDs."
 
-            channel = self.discord_client.get_channel(channel_int)
-            if channel is None:
-                channel = await self.discord_client.fetch_channel(channel_int)
-            if not hasattr(channel, "fetch_message"):
-                return f"Channel {target_channel_id} does not support fetch_message."
+            try:
+                channel = self.discord_client.get_channel(channel_int)
+                if channel is None:
+                    channel = await self.discord_client.fetch_channel(channel_int)
+                if not hasattr(channel, "fetch_message"):
+                    return f"Channel {target_channel_id} does not support fetch_message."
 
-            message = await channel.fetch_message(message_int)
-            await message.add_reaction(emoji)
+                message = await channel.fetch_message(message_int)
+                await message.add_reaction(emoji)
+            except discord.Forbidden:
+                self.log_event(
+                    "tool_call_error",
+                    tool="react",
+                    error_type="Forbidden",
+                    channel_id=target_channel_id,
+                    message_id=str(target_message_id),
+                )
+                return f"react failed: missing permissions in channel {target_channel_id}."
+            except discord.HTTPException as exc:
+                self.log_event(
+                    "tool_call_error",
+                    tool="react",
+                    error_type="HTTPException",
+                    channel_id=target_channel_id,
+                    message_id=str(target_message_id),
+                    status=exc.status,
+                    error_code=exc.code,
+                )
+                return f"react failed: Discord API error {exc.status} in channel {target_channel_id}."
+
             self.log_event(
                 "tool_call",
                 tool="react",
