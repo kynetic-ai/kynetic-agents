@@ -4,6 +4,17 @@ from dataclasses import dataclass, field
 
 
 @dataclass
+class MempalaceWriteItem:
+    channel_id: str
+    author: str
+    content: str
+    timestamp: str
+    channel_name: str | None = None
+    message_id: str | None = None
+    is_bot: bool = False
+
+
+@dataclass
 class AgentEvent:
     event_type: str
     prompt: str

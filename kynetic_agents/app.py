@@ -41,7 +41,7 @@ from .config import (
     bootstrap_home_repo,
     load_config,
 )
-from .mcp_client import MCPManager
+from .mcp_client import MCPManager, MCPServerConfig
 from .phone_book import enrich_from_jsonl, load_phone_book, render_aliases_block
 from .discord import (
     DISCORD_HISTORY_REFRESH_LIMIT,
@@ -52,7 +52,7 @@ from .discord import (
     DiscordMixin,
     _chunk_discord_message,
 )
-from .models import AgentEvent
+from .models import AgentEvent, MempalaceWriteItem
 from .prompts import DEFAULT_CHECKPOINT, SYSTEM_PROMPT, render_folders_section, render_turn_prompt
 from .readonly_backend import BUILTIN_SKILLS_ROUTE, LoggingWriteGuardBackend, build_builtin_skills_backend
 from .scheduler import SchedulerJob, SchedulerMixin
@@ -69,6 +69,15 @@ from .tools import (
 UTC = timezone.utc
 LOG_ROLL_BYTES = 1_000_000
 TRANSIENT_PROVIDER_STATUS_CODES = frozenset({408, 409, 429, 500, 502, 503, 504, 529})
+
+MEMPALACE_READ_TOOLS = [
+    "mempalace_search",
+    "mempalace_get_drawer",
+    "mempalace_kg_query",
+    "mempalace_kg_timeline",
+    "mempalace_get_taxonomy",
+    "mempalace_list_drawers",
+]
 
 
 def utc_now_iso() -> str:
@@ -349,6 +358,8 @@ class OpenStrixApp(DiscordMixin, SchedulerMixin, ToolsMixin):
         self.supervisor = Supervisor(self.layout.state_dir / "climbers")
         self._draining = False
         self.mcp_manager: MCPManager | None = None
+        self._mempalace_write_queue: asyncio.Queue[MempalaceWriteItem] | None = None
+        self._mempalace_session: Any | None = None
         self.agent = self._create_agent()
 
     def _load_chat_history(self) -> None:
@@ -813,6 +824,46 @@ class OpenStrixApp(DiscordMixin, SchedulerMixin, ToolsMixin):
                 errors.append(f"{path.name}: expected a YAML mapping, got {type(loaded).__name__}")
         return errors
 
+    def _is_mempalace_channel(self, channel_id: str) -> bool:
+        channels = self.config.mempalace_channels
+        if not channels:
+            return False
+        if channel_id in channels:
+            return True
+        entry = self.phone_book.entries.get(channel_id)
+        return entry is not None and entry.name in channels
+
+    async def _run_mempalace_writer(self) -> None:
+        queue = self._mempalace_write_queue
+        session = self._mempalace_session
+        assert queue is not None and session is not None
+        while True:
+            item = await queue.get()
+            try:
+                wing = item.channel_name or item.channel_id
+                room = item.timestamp[:10]  # YYYY-MM-DD — one room per day
+                author_label = "bot" if item.is_bot else item.author
+                content = f"[{item.timestamp}] {author_label}: {item.content}"
+                await session.call_tool(
+                    "mempalace_add_drawer",
+                    {"wing": wing, "room": room, "content": content, "added_by": "kynetic-agents"},
+                )
+                self.log_event(
+                    "mempalace_write",
+                    channel_id=item.channel_id,
+                    message_id=item.message_id,
+                )
+            except Exception as exc:
+                self.log_event(
+                    "mempalace_write_error",
+                    channel_id=item.channel_id,
+                    message_id=item.message_id,
+                    error=str(exc),
+                    **_error_log_fields(exc),
+                )
+            finally:
+                queue.task_done()
+
     async def _process_event(self, event: AgentEvent) -> None:
         self._current_turn_sent_messages = []
         self._reset_send_message_circuit_breaker()
@@ -1003,11 +1054,23 @@ class OpenStrixApp(DiscordMixin, SchedulerMixin, ToolsMixin):
             )
 
     async def run(self) -> None:
-        # Start MCP servers and recreate agent with MCP tools if configured.
-        if self.config.mcp_servers:
+        # Build effective MCP server list, prepending mempalace if configured.
+        effective_mcp_servers = list(self.config.mcp_servers)
+        if self.config.mempalace_path:
+            effective_mcp_servers = [
+                MCPServerConfig(
+                    name="mempalace",
+                    command="python",
+                    args=["-m", "mempalace.mcp_server", "--path", self.config.mempalace_path],
+                    allowed_tools=MEMPALACE_READ_TOOLS,
+                ),
+                *effective_mcp_servers,
+            ]
+
+        if effective_mcp_servers:
             self.mcp_manager = MCPManager()
             mcp_tools = await self.mcp_manager.start_servers(
-                self.config.mcp_servers,
+                effective_mcp_servers,
                 log_fn=self.log_event,
             )
             if mcp_tools:
@@ -1015,6 +1078,25 @@ class OpenStrixApp(DiscordMixin, SchedulerMixin, ToolsMixin):
                 print(
                     f"[kynetic-agents] Agent recreated with {len(mcp_tools)} MCP tool(s)",
                     flush=True,
+                )
+
+        # Extract the raw mempalace session so the writer coroutine can call write tools.
+        if self.config.mempalace_path and self.mcp_manager:
+            for conn in self.mcp_manager.connections:
+                if conn.config.name == "mempalace":
+                    self._mempalace_session = conn.session
+                    break
+
+        # Start the singleton writer task only in the designated writer process.
+        if self.config.mempalace_writer and self.config.mempalace_channels:
+            if self._mempalace_session is not None:
+                self._mempalace_write_queue = asyncio.Queue()
+                asyncio.create_task(self._run_mempalace_writer())
+            else:
+                self.log_event(
+                    "warning",
+                    where="run",
+                    warning_type="mempalace_writer_no_session",
                 )
 
         self.worker_task = asyncio.create_task(self._event_worker())
@@ -1031,6 +1113,8 @@ class OpenStrixApp(DiscordMixin, SchedulerMixin, ToolsMixin):
             home=str(self.home),
             session_logs_cleaned=removed,
             mcp_servers=[c.config.name for c in (self.mcp_manager.connections if self.mcp_manager else [])],
+            mempalace_writer=self.config.mempalace_writer and self._mempalace_write_queue is not None,
+            mempalace_channels=self.config.mempalace_channels,
         )
 
         if self.config.api_port > 0:
@@ -1087,6 +1171,11 @@ class OpenStrixApp(DiscordMixin, SchedulerMixin, ToolsMixin):
     async def shutdown(self) -> None:
         self.log_event("app_shutdown_start")
         self.supervisor.stop_all()
+        if self._mempalace_write_queue is not None:
+            try:
+                await asyncio.wait_for(self._mempalace_write_queue.join(), timeout=10.0)
+            except asyncio.TimeoutError:
+                self.log_event("warning", where="shutdown", warning_type="mempalace_drain_timeout")
         if self.mcp_manager is not None:
             await self.mcp_manager.shutdown()
         if self.api_runner is not None:

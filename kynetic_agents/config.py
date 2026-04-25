@@ -213,6 +213,9 @@ class AppConfig:
     mcp_servers: list[MCPServerConfig] = field(default_factory=list)
     disable_builtin_skills: set[str] = field(default_factory=set)
     subagents: list[SubAgentConfig] = field(default_factory=list)
+    mempalace_path: str | None = None
+    mempalace_writer: bool = False
+    mempalace_channels: list[str] = field(default_factory=list)
 
     @property
     def writable_dirs(self) -> list[str]:
@@ -307,6 +310,11 @@ def load_config(layout: RepoLayout) -> AppConfig:
         mcp_servers=parse_mcp_server_configs(loaded.get("mcp_servers")),
         disable_builtin_skills=_normalize_id_list(loaded.get("disable_builtin_skills")),
         subagents=_parse_subagent_configs(loaded.get("subagents")),
+        mempalace_path=str(loaded["mempalace_path"]).strip() or None
+        if loaded.get("mempalace_path")
+        else None,
+        mempalace_writer=bool(loaded.get("mempalace_writer", False)),
+        mempalace_channels=_parse_home_channels(loaded.get("mempalace_channels")),
     )
 
 

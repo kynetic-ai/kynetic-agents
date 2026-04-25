@@ -21,6 +21,7 @@ class MCPServerConfig:
     command: str
     args: list[str]
     env: dict[str, str] | None = None
+    allowed_tools: list[str] | None = None  # None = expose all tools
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> MCPServerConfig:
@@ -43,7 +44,9 @@ class MCPServerConfig:
                     var_name = val[2:-1]
                     val = os.environ.get(var_name, "")
                 env[str(k)] = val
-        return cls(name=name, command=command, args=args, env=env)
+        raw_allowed = data.get("allowed_tools")
+        allowed_tools = [str(t) for t in raw_allowed if str(t).strip()] if isinstance(raw_allowed, list) else None
+        return cls(name=name, command=command, args=args, env=env, allowed_tools=allowed_tools)
 
 
 class MCPConnection:
@@ -59,6 +62,8 @@ class MCPConnection:
         result = await self.session.list_tools()
         tools: list[StructuredTool] = []
         for mcp_tool in result.tools:
+            if self.config.allowed_tools is not None and mcp_tool.name not in self.config.allowed_tools:
+                continue
             lc_tool = _bridge_mcp_tool(
                 server_name=self.config.name,
                 tool_name=mcp_tool.name,

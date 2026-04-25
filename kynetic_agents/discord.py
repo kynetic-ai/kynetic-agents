@@ -9,7 +9,7 @@ from typing import Any
 
 import discord
 
-from .models import AgentEvent
+from .models import AgentEvent, MempalaceWriteItem
 from .phone_book import populate_from_guilds, save_phone_book, update_from_message
 
 UTC = timezone.utc
@@ -530,6 +530,21 @@ class DiscordMixin:
                     "attachments": list(attachment_names),
                 },
             )
+            if (
+                self._mempalace_write_queue is not None
+                and content.strip()
+                and self._is_mempalace_channel(channel_id)
+            ):
+                channel_entry = self.phone_book.entries.get(channel_id)
+                self._mempalace_write_queue.put_nowait(MempalaceWriteItem(
+                    channel_id=channel_id,
+                    channel_name=channel_entry.name if channel_entry else None,
+                    author=author,
+                    content=content,
+                    timestamp=item["timestamp"],
+                    message_id=normalized_message_id,
+                    is_bot=is_bot,
+                ))
         return True
 
     def _latest_message_reference(
