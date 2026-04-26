@@ -195,6 +195,25 @@ class DiscordBridge(discord.Client):
         else:
             author_addressed_bot = False
 
+        # Enqueue to mempalace before the home_channels gate so that all messages
+        # in monitored channels are captured regardless of whether this agent acts on them.
+        if (
+            self._app._mempalace_write_queue is not None
+            and message.content
+            and message.content.strip()
+            and self._app._is_mempalace_channel(str(channel_id or ""))
+        ):
+            channel_entry = self._app.phone_book.entries.get(str(channel_id or ""))
+            self._app._mempalace_write_queue.put_nowait(MempalaceWriteItem(
+                channel_id=str(channel_id or ""),
+                channel_name=channel_entry.name if channel_entry else channel_name,
+                author=str(message.author),
+                content=message.content,
+                timestamp=_utc_now_iso(),
+                message_id=str(message.id),
+                is_bot=bool(getattr(message.author, "bot", False)),
+            ))
+
         if not self._app.should_process_discord_message(
             author_is_bot=bool(getattr(message.author, "bot", False)),
             author_id=author_id,
@@ -275,6 +294,18 @@ class DiscordMixin:
                             )
                         sent = True
                         sent_chunks += 1
+
+                    if sent and text.strip() and self._mempalace_write_queue is not None and self._is_mempalace_channel(channel_id):
+                        channel_entry = self.phone_book.entries.get(channel_id)
+                        self._mempalace_write_queue.put_nowait(MempalaceWriteItem(
+                            channel_id=channel_id,
+                            channel_name=channel_entry.name if channel_entry else None,
+                            author="kynetic_agents",
+                            content=text,
+                            timestamp=_utc_now_iso(),
+                            message_id=sent_message_id,
+                            is_bot=True,
+                        ))
 
         if not sent:
             for chunk in chunks:
@@ -530,21 +561,6 @@ class DiscordMixin:
                     "attachments": list(attachment_names),
                 },
             )
-            if (
-                self._mempalace_write_queue is not None
-                and content.strip()
-                and self._is_mempalace_channel(channel_id)
-            ):
-                channel_entry = self.phone_book.entries.get(channel_id)
-                self._mempalace_write_queue.put_nowait(MempalaceWriteItem(
-                    channel_id=channel_id,
-                    channel_name=channel_entry.name if channel_entry else None,
-                    author=author,
-                    content=content,
-                    timestamp=item["timestamp"],
-                    message_id=normalized_message_id,
-                    is_bot=is_bot,
-                ))
         return True
 
     def _latest_message_reference(

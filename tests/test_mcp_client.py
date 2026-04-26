@@ -151,7 +151,7 @@ class TestBridgeMCPTool:
         )
         assert tool.name == "mcp_brave_search"
         assert "Search the web" in tool.description
-        assert "query" in tool.description
+        # Parameter info now lives in args_schema (machine-readable), not embedded in description text.
 
     def test_empty_schema(self):
         session = MagicMock()
@@ -164,6 +164,115 @@ class TestBridgeMCPTool:
         )
         assert tool.name == "mcp_test_ping"
         assert tool.description == "Ping the server"
+
+
+# ---------- _bridge_mcp_tool structured schema ----------
+
+
+class TestBridgeMCPToolSchema:
+    """Intent: bridged MCP tools must expose a machine-readable structured schema.
+
+    Without this, models call tools without required arguments because they only
+    see plain-text parameter docs instead of a JSON Schema the framework enforces.
+    The fix is a proper args_schema so the LLM sees required/optional correctly."""
+
+    def _make_tool(self, input_schema: dict[str, Any]):
+        return _bridge_mcp_tool(
+            server_name="mempalace",
+            tool_name="search",
+            description="Semantic search",
+            input_schema=input_schema,
+            session=MagicMock(),
+        )
+
+    def test_required_field_appears_in_schema_required_list(self) -> None:
+        """A required MCP parameter must be in the schema's required list, not just description text."""
+        tool = self._make_tool({
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Search keywords"},
+            },
+            "required": ["query"],
+        })
+        schema = tool.args_schema.model_json_schema()
+        assert "query" in schema.get("required", []), (
+            "required fields must appear in args_schema.required so the LLM knows they are mandatory"
+        )
+
+    def test_optional_field_not_in_required_list(self) -> None:
+        """Optional MCP parameters must NOT appear in required so the LLM can omit them."""
+        tool = self._make_tool({
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Search keywords"},
+                "limit": {"type": "integer", "description": "Max results"},
+            },
+            "required": ["query"],
+        })
+        schema = tool.args_schema.model_json_schema()
+        assert "limit" not in schema.get("required", [])
+
+    def test_field_description_preserved_in_schema(self) -> None:
+        """Parameter descriptions from the MCP schema must reach the LLM via the Pydantic schema."""
+        tool = self._make_tool({
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "SENTINEL_DESCRIPTION"},
+            },
+            "required": ["query"],
+        })
+        schema = tool.args_schema.model_json_schema()
+        assert "SENTINEL_DESCRIPTION" in schema["properties"]["query"].get("description", "")
+
+    def test_string_type_preserved_in_schema(self) -> None:
+        """JSON Schema 'string' must appear as string type so the LLM generates correct values."""
+        tool = self._make_tool({
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "A string param"},
+            },
+            "required": ["query"],
+        })
+        schema = tool.args_schema.model_json_schema()
+        # Required string field: schema type must be "string"
+        assert schema["properties"]["query"].get("type") == "string"
+
+    def test_integer_type_preserved_in_schema(self) -> None:
+        """JSON Schema 'integer' must appear as integer type."""
+        tool = self._make_tool({
+            "type": "object",
+            "properties": {
+                "limit": {"type": "integer", "description": "Max results"},
+            },
+            "required": [],
+        })
+        schema = tool.args_schema.model_json_schema()
+        assert "limit" in schema["properties"]
+        # Optional integer — may be anyOf[integer, null]; integer must be present
+        limit_schema = schema["properties"]["limit"]
+        type_str = json.dumps(limit_schema)
+        assert "integer" in type_str
+
+    def test_empty_schema_has_no_required_fields(self) -> None:
+        """A tool with no properties must produce an empty required list."""
+        tool = self._make_tool({"type": "object"})
+        schema = tool.args_schema.model_json_schema()
+        assert schema.get("required", []) == []
+
+    def test_multiple_required_fields_all_present(self) -> None:
+        """When multiple fields are required, all of them appear in required."""
+        tool = self._make_tool({
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Query"},
+                "wing": {"type": "string", "description": "Wing"},
+            },
+            "required": ["query", "wing"],
+        })
+        schema = tool.args_schema.model_json_schema()
+        required = schema.get("required", [])
+        assert "query" in required
+        assert "wing" in required
 
 
 # ---------- MCPConnection ----------

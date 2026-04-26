@@ -5,19 +5,21 @@ Covers four areas of intent:
   2. MCP allowed_tools filter — servers only expose permitted tools to agents.
   3. Channel detection — _is_mempalace_channel() identifies configured channels
      by ID or by name.
-  4. Message enqueuing — _remember_message() enqueues to the writer queue at
-     the right times and stays silent when it should.
+  4. Message enqueuing — on_message() enqueues all messages (human and bot) in
+     mempalace_channels before the home_channels gate runs.
 """
 from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 import kynetic_agents.app as app_mod
+import kynetic_agents.discord as discord_mod
 from kynetic_agents.config import AppConfig, RepoLayout, load_config
 from kynetic_agents.mcp_client import MCPConnection, MCPServerConfig
 from kynetic_agents.models import MempalaceWriteItem
@@ -264,8 +266,43 @@ class TestMempalaceChannelDetection:
 # 4. Message enqueuing
 # ---------------------------------------------------------------------------
 
+def _make_bridge_for_enqueue(app: app_mod.OpenStrixApp) -> discord_mod.DiscordBridge:
+    """Construct a DiscordBridge without going through discord.Client startup."""
+    bridge = object.__new__(discord_mod.DiscordBridge)
+    bridge._app = app
+    bridge._connection = SimpleNamespace(user=SimpleNamespace(id=999, name="test-bot"))
+    return bridge
+
+
+def _fake_discord_message(
+    *,
+    channel_id: int = 555,
+    channel_name: str = "collab",
+    content: str = "hello world",
+    author_is_bot: bool = False,
+    author_id: int = 1,
+    message_id: int = 1001,
+) -> SimpleNamespace:
+    author = SimpleNamespace(id=author_id, bot=author_is_bot, name=f"user-{author_id}")
+    channel = SimpleNamespace(id=channel_id, name=channel_name)
+    return SimpleNamespace(
+        id=message_id,
+        author=author,
+        channel=channel,
+        mentions=[],
+        content=content,
+        attachments=[],
+    )
+
+
 class TestMempalaceMessageEnqueue:
-    """_remember_message() should enqueue exactly when all conditions are met."""
+    """All messages in mempalace_channels must be enqueued regardless of who sent them
+    or whether the home_channels gate would process them.
+
+    Enqueue happens in on_message() *before* should_process_discord_message(), so
+    the collaboration channel is captured even when the agent isn't tagged and would
+    otherwise ignore the message. Both human and bot messages are stored.
+    """
 
     def _app_with_queue(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -279,127 +316,122 @@ class TestMempalaceMessageEnqueue:
         app._mempalace_write_queue = queue
         return app, queue
 
-    def test_message_in_mempalace_channel_is_enqueued(
+    @pytest.mark.asyncio
+    async def test_human_message_in_mempalace_channel_is_enqueued(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """Human messages in a mempalace channel must be captured."""
         app, queue = self._app_with_queue(tmp_path, monkeypatch)
+        bridge = _make_bridge_for_enqueue(app)
+        monkeypatch.setattr(app, "should_process_discord_message", lambda **kw: False)
 
-        app._remember_message(
-            channel_id="555",
-            author="alice",
-            content="hello world",
-            attachment_names=[],
+        await bridge.on_message(
+            _fake_discord_message(channel_id=555, content="hello world", author_is_bot=False)
         )
 
         assert queue.qsize() == 1
         item = queue.get_nowait()
         assert item.channel_id == "555"
-        assert item.author == "alice"
         assert item.content == "hello world"
+        assert item.is_bot is False
 
-    def test_message_in_non_mempalace_channel_is_not_enqueued(
+    @pytest.mark.asyncio
+    async def test_bot_message_in_mempalace_channel_is_enqueued(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Bot messages in a mempalace channel must also be captured, marked is_bot=True."""
+        app, queue = self._app_with_queue(tmp_path, monkeypatch)
+        bridge = _make_bridge_for_enqueue(app)
+        monkeypatch.setattr(app, "should_process_discord_message", lambda **kw: False)
+
+        await bridge.on_message(
+            _fake_discord_message(channel_id=555, content="I can help.", author_is_bot=True)
+        )
+
+        assert queue.qsize() == 1
+        item = queue.get_nowait()
+        assert item.is_bot is True
+
+    @pytest.mark.asyncio
+    async def test_message_in_non_mempalace_channel_is_not_enqueued(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         app, queue = self._app_with_queue(tmp_path, monkeypatch)
+        bridge = _make_bridge_for_enqueue(app)
+        monkeypatch.setattr(app, "should_process_discord_message", lambda **kw: False)
 
-        app._remember_message(
-            channel_id="999",  # not in mempalace_channels
-            author="alice",
-            content="hello world",
-            attachment_names=[],
-        )
+        await bridge.on_message(_fake_discord_message(channel_id=999, content="hello world"))
 
         assert queue.qsize() == 0
 
-    def test_history_replay_does_not_enqueue(
+    @pytest.mark.asyncio
+    async def test_enqueue_happens_before_home_channels_gate(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """persist=False (used during startup history replay) must never enqueue.
-        This prevents re-ingesting the full chat history every time the bot restarts."""
+        """The gate returning False must not prevent the message from being stored.
+
+        This is the core architectural guarantee: the collaboration channel is captured
+        in mempalace regardless of whether any agent processes the message."""
         app, queue = self._app_with_queue(tmp_path, monkeypatch)
-
-        app._remember_message(
-            channel_id="555",
-            author="alice",
-            content="hello world",
-            attachment_names=[],
-            persist=False,
+        bridge = _make_bridge_for_enqueue(app)
+        gate_calls: list[bool] = []
+        monkeypatch.setattr(
+            app,
+            "should_process_discord_message",
+            lambda **kw: gate_calls.append(True) or False,
         )
 
-        assert queue.qsize() == 0
+        await bridge.on_message(_fake_discord_message(channel_id=555, content="human update"))
 
-    def test_empty_content_is_not_enqueued(
+        assert gate_calls, "gate should have been called"
+        assert queue.qsize() == 1, "message must be enqueued even though gate returned False"
+
+    @pytest.mark.asyncio
+    async def test_empty_content_is_not_enqueued(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         app, queue = self._app_with_queue(tmp_path, monkeypatch)
+        bridge = _make_bridge_for_enqueue(app)
+        monkeypatch.setattr(app, "should_process_discord_message", lambda **kw: False)
 
-        app._remember_message(
-            channel_id="555",
-            author="alice",
-            content="   ",
-            attachment_names=[],
-        )
+        await bridge.on_message(_fake_discord_message(channel_id=555, content="   "))
 
         assert queue.qsize() == 0
 
-    def test_no_queue_means_no_enqueue(
+    @pytest.mark.asyncio
+    async def test_no_queue_does_not_crash(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Non-writer processes have _mempalace_write_queue=None; nothing should blow up."""
+        """Non-writer processes have _mempalace_write_queue=None; on_message must not blow up."""
         app = _make_app(
             tmp_path,
             "mempalace_channels:\n  - '555'\n",
             monkeypatch,
         )
         assert app._mempalace_write_queue is None
+        bridge = _make_bridge_for_enqueue(app)
+        monkeypatch.setattr(app, "should_process_discord_message", lambda **kw: False)
 
-        # Should complete without error and not attempt to enqueue anything.
-        app._remember_message(
-            channel_id="555",
-            author="alice",
-            content="hello",
-            attachment_names=[],
-        )
+        await bridge.on_message(_fake_discord_message(channel_id=555, content="hello"))
 
-    def test_duplicate_message_is_not_enqueued_twice(
+    def test_remember_message_does_not_enqueue(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """_remember_message deduplicates by message_id; the second call is a no-op."""
+        """Structural guarantee: _remember_message has no enqueue logic.
+
+        History replay on startup calls _remember_message(persist=False) for every
+        stored message. Since enqueue was moved to on_message(), this path can never
+        re-ingest the full chat history on restart."""
         app, queue = self._app_with_queue(tmp_path, monkeypatch)
 
         app._remember_message(
             channel_id="555",
             author="alice",
-            content="hello",
+            content="hello world",
             attachment_names=[],
-            message_id="msg-1",
-        )
-        app._remember_message(
-            channel_id="555",
-            author="alice",
-            content="hello",
-            attachment_names=[],
-            message_id="msg-1",  # same ID — duplicate
         )
 
-        assert queue.qsize() == 1
-
-    def test_enqueued_item_carries_bot_flag(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Bot messages enqueued to mempalace are marked is_bot=True."""
-        app, queue = self._app_with_queue(tmp_path, monkeypatch)
-
-        app._remember_message(
-            channel_id="555",
-            author="kynetic_agents",
-            content="I can help with that.",
-            attachment_names=[],
-            is_bot=True,
-        )
-
-        item = queue.get_nowait()
-        assert item.is_bot is True
+        assert queue.qsize() == 0
 
 
 # ---------------------------------------------------------------------------
