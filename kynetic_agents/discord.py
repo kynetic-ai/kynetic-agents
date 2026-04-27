@@ -197,11 +197,15 @@ class DiscordBridge(discord.Client):
 
         # Enqueue to mempalace before the home_channels gate so that all messages
         # in monitored channels are captured regardless of whether this agent acts on them.
+        # Skip the bot's own messages — _send_discord_message() already enqueues those,
+        # and Discord echoes the bot's sent messages back as on_message events.
+        _own_bot_id = getattr(bot_user, "id", None) if bot_user is not None else None
         if (
             self._app._mempalace_write_queue is not None
             and message.content
             and message.content.strip()
             and self._app._is_mempalace_channel(str(channel_id or ""))
+            and author_id != _own_bot_id
         ):
             channel_entry = self._app.phone_book.entries.get(str(channel_id or ""))
             self._app._mempalace_write_queue.put_nowait(MempalaceWriteItem(

@@ -414,6 +414,43 @@ class TestMempalaceMessageEnqueue:
 
         await bridge.on_message(_fake_discord_message(channel_id=555, content="hello"))
 
+    @pytest.mark.asyncio
+    async def test_bots_own_message_via_on_message_is_not_enqueued(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The bot's own outgoing messages must NOT be enqueued via on_message().
+
+        _send_discord_message() already enqueues them. Without this guard, every
+        outgoing message is stored twice — once by the send path and once when
+        Discord echoes the message back as an on_message event."""
+        app, queue = self._app_with_queue(tmp_path, monkeypatch)
+        bridge = _make_bridge_for_enqueue(app)  # bot_user.id == 999
+        monkeypatch.setattr(app, "should_process_discord_message", lambda **kw: False)
+
+        await bridge.on_message(
+            _fake_discord_message(channel_id=555, content="I replied.", author_id=999, author_is_bot=True)
+        )
+
+        assert queue.qsize() == 0
+
+    @pytest.mark.asyncio
+    async def test_other_bots_message_is_still_enqueued(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Messages from OTHER bots (e.g. spoke agents) must still be captured.
+
+        Only the process's own bot ID is excluded; other bots in the channel
+        are valid authors whose messages belong in the shared semantic memory."""
+        app, queue = self._app_with_queue(tmp_path, monkeypatch)
+        bridge = _make_bridge_for_enqueue(app)  # bot_user.id == 999
+        monkeypatch.setattr(app, "should_process_discord_message", lambda **kw: False)
+
+        await bridge.on_message(
+            _fake_discord_message(channel_id=555, content="Spoke update.", author_id=42, author_is_bot=True)
+        )
+
+        assert queue.qsize() == 1
+
     def test_remember_message_does_not_enqueue(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
