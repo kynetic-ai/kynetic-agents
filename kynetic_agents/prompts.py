@@ -78,6 +78,17 @@ Python:
 """
 
 
+MEMPALACE_SECTION = """\
+Shared Memory (mempalace):
+- Conversations in shared channels are stored in mempalace — a searchable knowledge base organized by channel (wing) and date (room).
+- Use `mcp_mempalace_mempalace_search` to semantically search past conversations.
+- Use `mcp_mempalace_mempalace_kg_query` to query the knowledge graph for entities and relationships.
+- Use `mcp_mempalace_mempalace_list_drawers` to browse what channels and dates have stored history.
+- When searching for context older than what `list_messages` can reach, use mempalace first.
+- See the mempalace skill for detailed query patterns and examples.\
+"""
+
+
 def render_folders_section(folders: dict[str, str]) -> str:
     if not folders:
         return ""

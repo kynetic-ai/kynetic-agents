@@ -53,7 +53,7 @@ from .discord import (
     _chunk_discord_message,
 )
 from .models import AgentEvent, MempalaceWriteItem
-from .prompts import DEFAULT_CHECKPOINT, SYSTEM_PROMPT, render_folders_section, render_turn_prompt
+from .prompts import DEFAULT_CHECKPOINT, MEMPALACE_SECTION, SYSTEM_PROMPT, render_folders_section, render_turn_prompt
 from .readonly_backend import BUILTIN_SKILLS_ROUTE, LoggingWriteGuardBackend, build_builtin_skills_backend
 from .scheduler import SchedulerJob, SchedulerMixin
 from .supervisor import Supervisor
@@ -424,7 +424,7 @@ class OpenStrixApp(DiscordMixin, SchedulerMixin, ToolsMixin):
                         emoji=emoji,
                     )
 
-    def _create_agent(self, extra_tools: list[Any] | None = None) -> Any:
+    def _create_agent(self, extra_tools: list[Any] | None = None, has_mempalace: bool = False) -> Any:
         """Build the LangGraph agent with all tools."""
         mutable_backend = LoggingWriteGuardBackend(
             root_dir=self.home,
@@ -456,6 +456,8 @@ class OpenStrixApp(DiscordMixin, SchedulerMixin, ToolsMixin):
             system_prompt = system_prompt.replace(
                 "Skills:", f"{folders_text}\n\nSkills:",
             )
+        if has_mempalace:
+            system_prompt = system_prompt + "\n\n" + MEMPALACE_SECTION
 
         tools = self._build_tools()
         if extra_tools:
@@ -1074,7 +1076,7 @@ class OpenStrixApp(DiscordMixin, SchedulerMixin, ToolsMixin):
                 log_fn=self.log_event,
             )
             if mcp_tools:
-                self.agent = self._create_agent(extra_tools=mcp_tools)
+                self.agent = self._create_agent(extra_tools=mcp_tools, has_mempalace=bool(self.config.mempalace_path))
                 print(
                     f"[kynetic-agents] Agent recreated with {len(mcp_tools)} MCP tool(s)",
                     flush=True,
