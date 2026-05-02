@@ -6,7 +6,7 @@ import json
 import os
 from contextlib import AsyncExitStack
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 
 from langchain_core.tools import StructuredTool, ToolException
 from mcp import ClientSession, StdioServerParameters
@@ -139,39 +139,54 @@ class MCPManager:
         self.connections.clear()
 
 
-_JSON_SCHEMA_TYPE_MAP: dict[str, type] = {
+_JSON_TYPE_MAP: dict[str, type] = {
     "string": str,
     "integer": int,
     "number": float,
     "boolean": bool,
-    "array": list,
-    "object": dict,
 }
 
 
-def _json_schema_to_pydantic(model_name: str, schema: dict[str, Any]) -> type[BaseModel]:
-    """Build a Pydantic model from a JSON Schema object so LangChain exposes a real schema.
-
-    Without this, StructuredTool infers schema from **kwargs and produces an empty schema —
-    the LLM can't tell which arguments are required and calls tools with missing args.
-    """
-    properties: dict[str, Any] = schema.get("properties", {})
-    required_fields: set[str] = set(schema.get("required", []))
+def _build_args_schema(
+    tool_name: str,
+    input_schema: dict[str, Any],
+) -> type[BaseModel]:
+    """Generate a Pydantic model from an MCP tool's JSON Schema inputSchema."""
+    properties = input_schema.get("properties", {})
+    required_fields = set(input_schema.get("required", []))
 
     field_definitions: dict[str, Any] = {}
     for prop_name, prop_info in properties.items():
-        python_type = _JSON_SCHEMA_TYPE_MAP.get(prop_info.get("type", ""), str)
+        json_type = prop_info.get("type", "string")
         prop_desc = prop_info.get("description", "")
+        py_type = _JSON_TYPE_MAP.get(json_type, Any)
+
+        if json_type == "array":
+            items_type = _JSON_TYPE_MAP.get(
+                prop_info.get("items", {}).get("type", "string"), Any
+            )
+            py_type = list[items_type]  # type: ignore[valid-type]
+        elif json_type == "object":
+            py_type = dict[str, Any]
+
         if prop_name in required_fields:
-            field_definitions[prop_name] = (python_type, Field(description=prop_desc))
-        else:
-            default_val = prop_info.get("default", None)
             field_definitions[prop_name] = (
-                Optional[python_type],
-                Field(default=default_val, description=prop_desc),
+                py_type,
+                Field(description=prop_desc),
+            )
+        else:
+            field_definitions[prop_name] = (
+                py_type | None,
+                Field(default=None, description=prop_desc),
             )
 
-    return create_model(model_name, **field_definitions)
+    # Create the model dynamically via pydantic's create_model().  If there
+    # are no properties the tool takes no arguments — return an empty model
+    # so LangChain still gets a concrete schema instead of inferring **kwargs.
+    model_name = "".join(
+        part.capitalize() for part in tool_name.replace("-", "_").split("_")
+    ) + "Input"
+    return create_model(model_name, **field_definitions)  # type: ignore[call-overload]
 
 
 def _bridge_mcp_tool(
@@ -183,8 +198,28 @@ def _bridge_mcp_tool(
     session: ClientSession,
 ) -> StructuredTool:
     """Wrap a single MCP tool as a LangChain StructuredTool."""
+    properties = input_schema.get("properties", {})
+    required_fields = set(input_schema.get("required", []))
+
+    # Build a simple schema description for the tool.
+    schema_desc_parts: list[str] = []
+    for prop_name, prop_info in properties.items():
+        prop_type = prop_info.get("type", "string")
+        prop_desc = prop_info.get("description", "")
+        req = " (required)" if prop_name in required_fields else ""
+        schema_desc_parts.append(f"  {prop_name} ({prop_type}{req}): {prop_desc}")
+
+    if schema_desc_parts:
+        full_description = f"{description}\n\nParameters:\n" + "\n".join(schema_desc_parts)
+    else:
+        full_description = description
+
+    # Namespace the tool name to avoid collisions with built-in tools.
     namespaced_name = f"mcp_{server_name}_{tool_name}"
-    args_schema = _json_schema_to_pydantic(namespaced_name, input_schema)
+
+    # Generate a Pydantic model so LangChain passes parameters by name
+    # instead of wrapping them in a kwargs dict.
+    args_model = _build_args_schema(tool_name, input_schema)
 
     async def _call_mcp_tool(**kwargs: Any) -> str:
         try:
@@ -211,8 +246,8 @@ def _bridge_mcp_tool(
     lc_tool = StructuredTool.from_function(
         coroutine=_call_mcp_tool,
         name=namespaced_name,
-        description=description,
-        args_schema=args_schema,
+        description=full_description,
+        args_schema=args_model,
         handle_tool_error=True,
     )
     return lc_tool
