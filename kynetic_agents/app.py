@@ -781,6 +781,13 @@ class OpenStrixApp(DiscordMixin, SchedulerMixin, ToolsMixin):
                 job_id=job.job_id,
                 error=str(exc),
             )
+        self.log_event(
+            "shell_job_complete",
+            job_id=job.job_id,
+            command=job.command,
+            exit_code=job.exit_code,
+            elapsed=elapsed,
+        )
 
     async def _run_post_turn_git_sync(self, event: AgentEvent) -> str:
         git_result = await asyncio.to_thread(_git_sync, self.home)
