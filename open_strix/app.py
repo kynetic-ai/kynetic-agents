@@ -36,6 +36,7 @@ from .config import (
     DEFAULT_SCHEDULER,
     STATE_DIR_NAME,
     AppConfig,
+    DEFAULT_MODEL_MAX_OUTPUT_TOKENS,
     DEFAULT_MODEL_MAX_RETRIES,
     RepoLayout,
     bootstrap_home_repo,
@@ -56,6 +57,7 @@ from .models import AgentEvent
 from .prompts import DEFAULT_CHECKPOINT, SYSTEM_PROMPT, render_folders_section, render_turn_prompt
 from .readonly_backend import BUILTIN_SKILLS_ROUTE, LoggingWriteGuardBackend, build_builtin_skills_backend
 from .scheduler import SchedulerJob, SchedulerMixin
+from .shell_jobs import ShellJobRegistry
 from .supervisor import Supervisor
 from .tools import (
     SEND_MESSAGE_LOOP_HARD_LIMIT,
@@ -119,11 +121,19 @@ def _model_for_deep_agents(model_name: str) -> str:
     return f"{DEFAULT_MODEL_PROVIDER}:{cleaned}"
 
 
-def _build_chat_model(model_name: str, *, max_retries: int = DEFAULT_MODEL_MAX_RETRIES) -> Any:
-    # Keep the same OpenAI initialization behavior as deepagents while making
-    # provider retries explicit in open-strix config.
+def _build_chat_model(
+    model_name: str,
+    *,
+    max_retries: int = DEFAULT_MODEL_MAX_RETRIES,
+    max_tokens: int = DEFAULT_MODEL_MAX_OUTPUT_TOKENS,
+) -> Any:
+    # langchain-anthropic falls back to 4096 max output tokens for any model
+    # not in its Claude-only profile table. MiniMax-M2.5 triggers that fallback,
+    # which truncates tool_use args (e.g. write_file content) mid-stream. Pass
+    # max_tokens explicitly so large tool calls fit.
     model_init_params: dict[str, Any] = {
         "max_retries": max(0, int(max_retries)),
+        "max_tokens": max(1, int(max_tokens)),
     }
     if model_name.startswith("openai:"):
         model_init_params["use_responses_api"] = True
@@ -347,6 +357,9 @@ class OpenStrixApp(DiscordMixin, SchedulerMixin, ToolsMixin, WebChatMixin):
         self.current_channel_id: str | None = None
         self.current_event_label: str | None = None
         self.current_turn_start: float | None = None
+        # Captured once run() starts the event loop; worker threads use this
+        # to enqueue events from outside the loop (e.g. shell job waiters).
+        self.loop: asyncio.AbstractEventLoop | None = None
         self.session_id = f"{datetime.now(tz=UTC).strftime('%Y%m%dT%H%M%SZ')}-{uuid4().hex[:8]}"
 
         self.message_history_all: deque[dict[str, Any]] = deque(maxlen=500)
@@ -356,6 +369,9 @@ class OpenStrixApp(DiscordMixin, SchedulerMixin, ToolsMixin, WebChatMixin):
         self._load_chat_history()
         # Session-scoped cache for fetched web content; cleaned up on shutdown.
         self.fetch_cache_dir = Path(tempfile.mkdtemp(prefix="fetch-cache-", dir=self.layout.logs_dir))
+        self.shell_jobs = ShellJobRegistry(
+            jobs_dir=self.layout.logs_dir / "shell-jobs",
+        )
 
         self.discord_client: DiscordBridge | None = None
         self.api_runner: Any | None = None
@@ -460,6 +476,7 @@ class OpenStrixApp(DiscordMixin, SchedulerMixin, ToolsMixin, WebChatMixin):
         model = _build_chat_model(
             model_name,
             max_retries=self.config.model_max_retries,
+            max_tokens=self.config.model_max_output_tokens,
         )
         skills_sources: list[str] = []
         if self.layout.skills_dir.exists():
@@ -680,6 +697,73 @@ class OpenStrixApp(DiscordMixin, SchedulerMixin, ToolsMixin, WebChatMixin):
             source_id=event.source_id,
         )
 
+    def _handle_shell_job_complete(self, job: "ShellJob") -> None:
+        """Thread-safe bridge: a shell job waiter thread invokes this when the
+        subprocess exits. Schedules an async handler onto the main event loop
+        so we can enqueue a shell_job_complete event.
+        """
+        if self.loop is None or self.loop.is_closed():
+            return
+        try:
+            asyncio.run_coroutine_threadsafe(
+                self._on_shell_job_complete(job),
+                self.loop,
+            )
+        except Exception:
+            # Never let a waiter-thread crash break the registry.
+            pass
+
+    async def _on_shell_job_complete(self, job: "ShellJob") -> None:
+        """Enqueue a shell_job_complete event so the agent can react to a
+        finished async shell job without re-hydration.
+        """
+        try:
+            data = self.shell_jobs.read_output(
+                job.job_id, tail_lines=100, stream="both"
+            )
+        except Exception:
+            data = {"stdout_tail": "", "stderr_tail": ""}
+
+        stdout_tail = (data.get("stdout_tail") or "").strip()
+        stderr_tail = (data.get("stderr_tail") or "").strip()
+        # Bound each stream so a runaway job doesn't produce a giant prompt.
+        max_chars = 4000
+        if len(stdout_tail) > max_chars:
+            stdout_tail = stdout_tail[-max_chars:]
+        if len(stderr_tail) > max_chars:
+            stderr_tail = stderr_tail[-max_chars:]
+
+        elapsed = round(job.elapsed_seconds, 1)
+        status = job.status
+        lines = [
+            f"Shell job {job.job_id} complete (status={status}, exit_code={job.exit_code}, elapsed={elapsed}s).",
+            f"Command: {job.command}",
+            "",
+            "--- stdout tail ---",
+            stdout_tail or "(empty)",
+            "",
+            "--- stderr tail ---",
+            stderr_tail or "(empty)",
+        ]
+        prompt = "\n".join(lines)
+
+        event = AgentEvent(
+            event_type="shell_job_complete",
+            prompt=prompt,
+            channel_id=job.channel_id,
+            channel_name=job.channel_name,
+            source_id=f"shell_job:{job.job_id}",
+            dedupe_key=f"shell_job_complete:{job.job_id}",
+        )
+        try:
+            await self.enqueue_event(event)
+        except Exception as exc:
+            self.log_event(
+                "shell_job_complete_enqueue_failed",
+                job_id=job.job_id,
+                error=str(exc),
+            )
+
     async def _run_post_turn_git_sync(self, event: AgentEvent) -> str:
         git_result = await asyncio.to_thread(_git_sync, self.home)
         self.log_event(
@@ -858,7 +942,21 @@ class OpenStrixApp(DiscordMixin, SchedulerMixin, ToolsMixin, WebChatMixin):
     async def _process_event(self, event: AgentEvent) -> None:
         self._current_turn_sent_messages = []
         self._reset_send_message_circuit_breaker()
+        # Turn-time instrumentation (#91): baseline measurement that lets the
+        # eventual same-turn batching layer be evaluated against real numbers.
+        turn_start = time.monotonic()
+        timings: dict[str, float] = {
+            "context_load_seconds": 0.0,
+            "agent_invoke_seconds": 0.0,
+            "block_validation_seconds": 0.0,
+            "block_repair_invoke_seconds": 0.0,
+            "git_sync_seconds": 0.0,
+        }
+        repair_invoke_count = 0
+
+        prompt_start = time.monotonic()
         prompt = self._render_prompt(event)
+        timings["context_load_seconds"] = time.monotonic() - prompt_start
         self.log_event(
             "agent_invoke_start",
             source_event_type=event.event_type,
@@ -866,8 +964,10 @@ class OpenStrixApp(DiscordMixin, SchedulerMixin, ToolsMixin, WebChatMixin):
             scheduler_name=event.scheduler_name,
         )
         try:
+            invoke_start = time.monotonic()
             async with self._typing_indicator(event):
                 result = await self.agent.ainvoke({"messages": [HumanMessage(content=prompt)]})
+            timings["agent_invoke_seconds"] = time.monotonic() - invoke_start
             self._log_agent_trace(result)
             self._write_session_log(event, prompt, result)
 
@@ -879,8 +979,20 @@ class OpenStrixApp(DiscordMixin, SchedulerMixin, ToolsMixin, WebChatMixin):
                 final_text=final_text,
             )
 
+            tool_calls_in_turn = self._collect_tool_calls_in_turn(result)
+            if final_text and "send_message" not in tool_calls_in_turn:
+                self.log_event(
+                    "agent_turn_missing_send_message",
+                    source_event_type=event.event_type,
+                    channel_id=event.channel_id,
+                    final_text=final_text,
+                    tool_calls_in_turn=tool_calls_in_turn,
+                )
+
             # Post-turn hook: validate memory blocks and let agent self-correct
+            validation_start = time.monotonic()
             block_errors = self._validate_memory_blocks()
+            timings["block_validation_seconds"] = time.monotonic() - validation_start
             if block_errors:
                 error_list = "\n".join(f"  - {e}" for e in block_errors)
                 repair_prompt = (
@@ -894,10 +1006,13 @@ class OpenStrixApp(DiscordMixin, SchedulerMixin, ToolsMixin, WebChatMixin):
                     broken_blocks=[e.split(":")[0] for e in block_errors],
                     error_count=len(block_errors),
                 )
+                repair_start = time.monotonic()
                 async with self._typing_indicator(event):
                     result = await self.agent.ainvoke(
                         {"messages": [HumanMessage(content=repair_prompt)]}
                     )
+                timings["block_repair_invoke_seconds"] = time.monotonic() - repair_start
+                repair_invoke_count = 1
                 self._log_agent_trace(result)
                 # Check again — log but don't loop
                 remaining_errors = self._validate_memory_blocks()
@@ -907,10 +1022,22 @@ class OpenStrixApp(DiscordMixin, SchedulerMixin, ToolsMixin, WebChatMixin):
                         broken_blocks=[e.split(":")[0] for e in remaining_errors],
                     )
 
+            git_start = time.monotonic()
             await self._run_post_turn_git_sync(event)
+            timings["git_sync_seconds"] = time.monotonic() - git_start
         finally:
             self._reset_send_message_circuit_breaker()
             self._current_turn_sent_messages = None
+            rounded = {key: round(value, 4) for key, value in timings.items()}
+            self.log_event(
+                "turn_timing",
+                source_event_type=event.event_type,
+                channel_id=event.channel_id,
+                scheduler_name=event.scheduler_name,
+                total_seconds=round(time.monotonic() - turn_start, 4),
+                repair_invoke_count=repair_invoke_count,
+                **rounded,
+            )
 
     def _log_agent_trace(self, result: dict[str, Any]) -> None:
         messages = result.get("messages")
@@ -924,6 +1051,19 @@ class OpenStrixApp(DiscordMixin, SchedulerMixin, ToolsMixin, WebChatMixin):
                         tool=call.get("name"),
                         args=call.get("args"),
                     )
+
+    def _collect_tool_calls_in_turn(self, result: dict[str, Any]) -> list[str]:
+        messages = result.get("messages")
+        if not isinstance(messages, list):
+            return []
+        names: list[str] = []
+        for message in messages:
+            if isinstance(message, AIMessage):
+                for call in message.tool_calls:
+                    name = call.get("name")
+                    if isinstance(name, str):
+                        names.append(name)
+        return names
 
     def _write_session_log(
         self,
@@ -1027,6 +1167,9 @@ class OpenStrixApp(DiscordMixin, SchedulerMixin, ToolsMixin, WebChatMixin):
             )
 
     async def run(self) -> None:
+        # Capture the running event loop for cross-thread scheduling
+        # (e.g. shell job completion callbacks).
+        self.loop = asyncio.get_running_loop()
         # Start MCP servers and recreate agent with MCP tools if configured.
         if self.config.mcp_servers:
             self.mcp_manager = MCPManager()
