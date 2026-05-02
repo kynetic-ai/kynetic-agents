@@ -249,49 +249,78 @@ def _git_sync(home: Path) -> str:
     git_dir = home / ".git"
     if not git_dir.exists():
         return "skip: not a git repo"
-    add_proc = subprocess.run(
-        ["git", "add", "-A"],
-        cwd=home,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if add_proc.returncode != 0:
-        return f"git add failed: {add_proc.stderr.strip()}"
+    try:
+        add_proc = subprocess.run(
+            ["git", "add", "-A"],
+            cwd=home,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=15,
+        )
+        if add_proc.returncode != 0:
+            return f"git add failed: {add_proc.stderr.strip()}"
 
-    status_proc = subprocess.run(
-        ["git", "status", "--porcelain"],
-        cwd=home,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if status_proc.returncode != 0:
-        return f"git status failed: {status_proc.stderr.strip()}"
-    if not status_proc.stdout.strip():
-        return "clean: no changes"
+        status_proc = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=home,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=15,
+        )
+        if status_proc.returncode != 0:
+            return f"git status failed: {status_proc.stderr.strip()}"
+        if not status_proc.stdout.strip():
+            # Working tree is clean — check for stranded commits from a prior push timeout.
+            ahead_proc = subprocess.run(
+                ["git", "rev-list", "@{u}..HEAD", "--count"],
+                cwd=home,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=10,
+            )
+            if ahead_proc.returncode != 0 or ahead_proc.stdout.strip() in ("", "0"):
+                return "clean: no changes"
+            push_proc = subprocess.run(
+                ["git", "push"],
+                cwd=home,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=30,
+            )
+            if push_proc.returncode != 0:
+                return f"git push failed: {push_proc.stderr.strip()}"
+            return "ok: pushed pending commits"
 
-    commit_proc = subprocess.run(
-        ["git", "commit", "-m", f"kynetic-agents auto-commit {utc_now_iso()}"],
-        cwd=home,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if commit_proc.returncode != 0:
-        return f"git commit failed: {commit_proc.stderr.strip()}"
+        commit_proc = subprocess.run(
+            ["git", "commit", "-m", f"kynetic-agents auto-commit {utc_now_iso()}"],
+            cwd=home,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=15,
+        )
+        if commit_proc.returncode != 0:
+            return f"git commit failed: {commit_proc.stderr.strip()}"
 
-    push_proc = subprocess.run(
-        ["git", "push"],
-        cwd=home,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if push_proc.returncode != 0:
-        return f"git push failed: {push_proc.stderr.strip()}"
+        push_proc = subprocess.run(
+            ["git", "push"],
+            cwd=home,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+        if push_proc.returncode != 0:
+            return f"git push failed: {push_proc.stderr.strip()}"
 
-    return "ok: committed and pushed"
+        return "ok: committed and pushed"
+    except subprocess.TimeoutExpired as exc:
+        cmd = exc.cmd[-1] if isinstance(exc.cmd, list) else str(exc.cmd)
+        return f"git sync timeout: {cmd}"
 
 
 def _cleanup_old_sessions(sessions_dir: Path, retention_days: int) -> int:
