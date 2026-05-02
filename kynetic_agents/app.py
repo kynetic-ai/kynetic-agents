@@ -81,6 +81,12 @@ MEMPALACE_READ_TOOLS = [
     "mempalace_list_drawers",
 ]
 
+MEMPALACE_WRITE_TOOLS = [
+    "mempalace_kg_add",
+    "mempalace_kg_invalidate",
+    "mempalace_diary_write",
+]
+
 
 def utc_now_iso() -> str:
     return datetime.now(tz=UTC).isoformat()
@@ -1202,12 +1208,13 @@ class OpenStrixApp(DiscordMixin, SchedulerMixin, ToolsMixin):
         # Build effective MCP server list, prepending mempalace if configured.
         effective_mcp_servers = list(self.config.mcp_servers)
         if self.config.mempalace_path:
+            mempalace_tools = MEMPALACE_READ_TOOLS + (MEMPALACE_WRITE_TOOLS if self.config.mempalace_writer else [])
             effective_mcp_servers = [
                 MCPServerConfig(
                     name="mempalace",
                     command="python",
                     args=["-m", "mempalace.mcp_server", "--palace", self.config.mempalace_path],
-                    allowed_tools=MEMPALACE_READ_TOOLS,
+                    allowed_tools=mempalace_tools,
                 ),
                 *effective_mcp_servers,
             ]
