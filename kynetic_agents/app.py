@@ -323,6 +323,38 @@ def _git_sync(home: Path) -> str:
         return f"git sync timeout: {cmd}"
 
 
+def _extract_usage(result: dict[str, Any]) -> dict[str, int]:
+    """Sum token usage across all AIMessage objects returned by agent.ainvoke.
+
+    Checks usage_metadata (LangChain standard) first, then falls back to
+    response_metadata["usage"] (older langchain-anthropic).
+    """
+    totals: dict[str, int] = {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_creation_tokens": 0,
+    }
+    for msg in (result.get("messages") or []):
+        if not isinstance(msg, AIMessage):
+            continue
+        um = getattr(msg, "usage_metadata", None)
+        if um:
+            totals["input_tokens"]    += um.get("input_tokens",  0) or 0
+            totals["output_tokens"]   += um.get("output_tokens", 0) or 0
+            details = um.get("input_token_details") or {}
+            totals["cache_read_tokens"]     += details.get("cache_read",     0) or 0
+            totals["cache_creation_tokens"] += details.get("cache_creation", 0) or 0
+        else:
+            rm    = (getattr(msg, "response_metadata", None) or {})
+            usage = rm.get("usage") or {}
+            totals["input_tokens"]          += usage.get("input_tokens",                 0) or 0
+            totals["output_tokens"]         += usage.get("output_tokens",                0) or 0
+            totals["cache_read_tokens"]     += usage.get("cache_read_input_tokens",      0) or 0
+            totals["cache_creation_tokens"] += usage.get("cache_creation_input_tokens",  0) or 0
+    return {k: v for k, v in totals.items() if v > 0}
+
+
 def _cleanup_old_sessions(sessions_dir: Path, retention_days: int) -> int:
     """Remove session log directories older than retention_days."""
     if not sessions_dir.exists():
@@ -1022,6 +1054,14 @@ class OpenStrixApp(DiscordMixin, SchedulerMixin, ToolsMixin):
                 result = await self.agent.ainvoke({"messages": [HumanMessage(content=prompt)]})
             timings["agent_invoke_seconds"] = time.monotonic() - invoke_start
             self._log_agent_trace(result)
+            _usage = _extract_usage(result)
+            if _usage:
+                self.log_event(
+                    "llm_usage",
+                    source_event_type=event.event_type,
+                    scheduler_name=event.scheduler_name,
+                    **_usage,
+                )
             self._write_session_log(event, prompt, result)
 
             final_text = self._extract_final_text(result)
@@ -1085,6 +1125,14 @@ class OpenStrixApp(DiscordMixin, SchedulerMixin, ToolsMixin):
                 timings["block_repair_invoke_seconds"] = time.monotonic() - repair_start
                 repair_invoke_count = 1
                 self._log_agent_trace(result)
+                _repair_usage = _extract_usage(result)
+                if _repair_usage:
+                    self.log_event(
+                        "llm_usage",
+                        source_event_type="repair",
+                        scheduler_name=event.scheduler_name,
+                        **_repair_usage,
+                    )
                 # Check again — log but don't loop
                 remaining_errors = self._validate_memory_blocks()
                 if remaining_errors:
