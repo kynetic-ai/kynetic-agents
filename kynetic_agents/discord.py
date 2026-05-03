@@ -679,10 +679,55 @@ class DiscordMixin:
         )
 
     @asynccontextmanager
+    async def _busy_presence(self, event: AgentEvent):
+        """Set bot status to DND while a background (no-channel) event runs."""
+        if self.discord_client is None or not self.discord_client.is_ready():
+            yield
+            return
+
+        task_name = event.scheduler_name or event.event_type
+        try:
+            await self.discord_client.change_presence(
+                status=discord.Status.dnd,
+                activity=discord.Activity(
+                    type=discord.ActivityType.watching,
+                    name=f"\U0001f504 {task_name}",
+                ),
+            )
+            self.log_event(
+                "busy_presence_start",
+                source_event_type=event.event_type,
+                scheduler_name=event.scheduler_name,
+                task_name=task_name,
+            )
+        except Exception as exc:
+            self.log_event("busy_presence_error", phase="start", error=str(exc))
+            yield
+            return
+
+        try:
+            yield
+        finally:
+            try:
+                await self.discord_client.change_presence(
+                    status=discord.Status.online,
+                    activity=None,
+                )
+                self.log_event(
+                    "busy_presence_stop",
+                    source_event_type=event.event_type,
+                    scheduler_name=event.scheduler_name,
+                    task_name=task_name,
+                )
+            except Exception as exc:
+                self.log_event("busy_presence_error", phase="stop", error=str(exc))
+
+    @asynccontextmanager
     async def _typing_indicator(self, event: AgentEvent):
         channel_id = event.channel_id
         if channel_id is None:
-            yield
+            async with self._busy_presence(event):
+                yield
             return
 
         if self.discord_client is None or not self.discord_client.is_ready():

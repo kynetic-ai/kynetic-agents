@@ -385,3 +385,71 @@ class TestOnPollerFire:
 
         assert len(app.enqueued) == 1
         assert app.enqueued[0].source_platform is None
+
+    @pytest.mark.asyncio
+    async def test_poller_complete_logged_when_no_output(self, tmp_home: Path) -> None:
+        """poller_complete must fire even when stdout is empty (normal quiet-poll case)."""
+        skill_dir = tmp_home / "skills" / "quiet2"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "poller.py").write_text("pass\n")
+
+        poller = PollerConfig(
+            name="quiet-poller",
+            command="python poller.py",
+            cron="*/5 * * * *",
+            env={},
+            skill_dir=skill_dir,
+        )
+
+        app = FakeApp(tmp_home)
+        await app._on_poller_fire(poller)
+
+        complete_events = [e for e in app.events if e["type"] == "poller_complete"]
+        assert len(complete_events) == 1
+        assert complete_events[0]["events_emitted"] == 0
+
+    @pytest.mark.asyncio
+    async def test_poller_complete_logged_with_correct_count_when_output(self, tmp_home: Path) -> None:
+        """poller_complete events_emitted reflects actual number of enqueued events."""
+        skill_dir = tmp_home / "skills" / "counted"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "poller.py").write_text(
+            'import json\n'
+            'for i in range(2):\n'
+            '    print(json.dumps({"prompt": f"event {i}"}))\n'
+        )
+
+        poller = PollerConfig(
+            name="counted-poller",
+            command="python poller.py",
+            cron="*/5 * * * *",
+            env={},
+            skill_dir=skill_dir,
+        )
+
+        app = FakeApp(tmp_home)
+        await app._on_poller_fire(poller)
+
+        complete_events = [e for e in app.events if e["type"] == "poller_complete"]
+        assert len(complete_events) == 1
+        assert complete_events[0]["events_emitted"] == 2
+
+    @pytest.mark.asyncio
+    async def test_poller_complete_not_logged_on_nonzero_exit(self, tmp_home: Path) -> None:
+        """poller_complete must not fire when the poller exits non-zero."""
+        skill_dir = tmp_home / "skills" / "failing2"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "poller.py").write_text("import sys; sys.exit(1)\n")
+
+        poller = PollerConfig(
+            name="fail-poller2",
+            command="python poller.py",
+            cron="*/5 * * * *",
+            env={},
+            skill_dir=skill_dir,
+        )
+
+        app = FakeApp(tmp_home)
+        await app._on_poller_fire(poller)
+
+        assert not any(e["type"] == "poller_complete" for e in app.events)

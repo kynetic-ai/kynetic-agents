@@ -1849,3 +1849,207 @@ async def test_process_event_does_not_log_missing_send_message_when_no_final_tex
     events = _read_events(tmp_path)
     missing = [e for e in events if e.get("type") == "agent_turn_missing_send_message"]
     assert missing == []
+
+
+# ---------------------------------------------------------------------------
+# Busy-presence tests
+# ---------------------------------------------------------------------------
+
+class FakeDiscordClientWithPresence:
+    """Discord client stub that records change_presence calls."""
+
+    def __init__(self) -> None:
+        self.presence_calls: list[dict[str, Any]] = []
+
+    def is_ready(self) -> bool:
+        return True
+
+    def get_channel(self, _: int) -> None:
+        return None
+
+    async def fetch_channel(self, _: int) -> None:
+        raise Exception("no channel")
+
+    async def change_presence(self, *, status: Any, activity: Any) -> None:
+        self.presence_calls.append({"status": status, "activity": activity})
+
+
+@pytest.mark.asyncio
+async def test_scheduler_event_sets_dnd_presence_and_restores_online(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Scheduler events (no channel_id) must set DND presence before ainvoke and restore online after."""
+    _stub_agent_factory(monkeypatch)
+    app = app_mod.OpenStrixApp(tmp_path)
+    client = FakeDiscordClientWithPresence()
+    app.discord_client = client  # type: ignore[assignment]
+
+    import discord as discord_lib
+
+    observed: dict[str, Any] = {}
+
+    class FakeAgent:
+        async def ainvoke(self, _: dict[str, Any]) -> dict[str, Any]:
+            observed["status_during_invoke"] = client.presence_calls[-1]["status"] if client.presence_calls else None
+            return {"messages": []}
+
+    app.agent = FakeAgent()
+
+    await app._process_event(
+        app_mod.AgentEvent(
+            event_type="scheduler",
+            prompt="run daily report",
+            channel_id=None,
+            scheduler_name="daily-report",
+        ),
+    )
+
+    assert len(client.presence_calls) == 2
+
+    start_call = client.presence_calls[0]
+    assert start_call["status"] == discord_lib.Status.dnd
+    assert "daily-report" in start_call["activity"].name
+
+    stop_call = client.presence_calls[1]
+    assert stop_call["status"] == discord_lib.Status.online
+    assert stop_call["activity"] is None
+
+    assert observed["status_during_invoke"] == discord_lib.Status.dnd
+
+
+@pytest.mark.asyncio
+async def test_scheduler_event_restores_online_even_if_agent_raises(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Online presence is restored even when the agent turn raises an exception."""
+    _stub_agent_factory(monkeypatch)
+    app = app_mod.OpenStrixApp(tmp_path)
+    client = FakeDiscordClientWithPresence()
+    app.discord_client = client  # type: ignore[assignment]
+
+    import discord as discord_lib
+
+    class BoomAgent:
+        async def ainvoke(self, _: dict[str, Any]) -> dict[str, Any]:
+            raise RuntimeError("agent exploded")
+
+    app.agent = BoomAgent()
+
+    with contextlib.suppress(RuntimeError):
+        await app._process_event(
+            app_mod.AgentEvent(
+                event_type="scheduler",
+                prompt="crash me",
+                channel_id=None,
+                scheduler_name="crash-job",
+            ),
+        )
+
+    stop_calls = [c for c in client.presence_calls if c["status"] == discord_lib.Status.online]
+    assert len(stop_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_discord_message_event_uses_typing_not_presence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Discord message events (with channel_id) must use the typing indicator, not busy presence."""
+    _stub_agent_factory(monkeypatch)
+    app = app_mod.OpenStrixApp(tmp_path)
+
+    class FakeTypingContext:
+        def __init__(self, ch: "FakeChannel") -> None:
+            self._ch = ch
+
+        async def __aenter__(self) -> None:
+            self._ch.typing_entered += 1
+
+        async def __aexit__(self, *_: Any) -> None:
+            pass
+
+    class FakeChannel:
+        def __init__(self) -> None:
+            self.typing_entered = 0
+
+        def typing(self) -> FakeTypingContext:
+            return FakeTypingContext(self)
+
+    channel = FakeChannel()
+
+    class ClientWithChannel(FakeDiscordClientWithPresence):
+        def get_channel(self, _: int) -> FakeChannel:
+            return channel
+
+    app.discord_client = ClientWithChannel()  # type: ignore[assignment]
+    app.agent = DummyAgent()
+
+    await app._process_event(
+        app_mod.AgentEvent(
+            event_type="discord_message",
+            prompt="hi",
+            channel_id="123",
+            author="user",
+            source_id="999",
+        ),
+    )
+
+    assert channel.typing_entered == 1
+    assert app.discord_client.presence_calls == []
+
+
+@pytest.mark.asyncio
+async def test_busy_presence_skipped_when_discord_client_not_ready(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No presence calls when discord client is not ready."""
+    _stub_agent_factory(monkeypatch)
+    app = app_mod.OpenStrixApp(tmp_path)
+
+    class NotReadyClient(FakeDiscordClientWithPresence):
+        def is_ready(self) -> bool:
+            return False
+
+    app.discord_client = NotReadyClient()  # type: ignore[assignment]
+    app.agent = DummyAgent()
+
+    await app._process_event(
+        app_mod.AgentEvent(
+            event_type="scheduler",
+            prompt="run",
+            channel_id=None,
+            scheduler_name="some-job",
+        ),
+    )
+
+    assert app.discord_client.presence_calls == []
+
+
+@pytest.mark.asyncio
+async def test_busy_presence_uses_event_type_when_no_scheduler_name(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When scheduler_name is absent, busy presence falls back to event_type in the activity name."""
+    _stub_agent_factory(monkeypatch)
+    app = app_mod.OpenStrixApp(tmp_path)
+    client = FakeDiscordClientWithPresence()
+    app.discord_client = client  # type: ignore[assignment]
+    app.agent = DummyAgent()
+
+    import discord as discord_lib
+
+    await app._process_event(
+        app_mod.AgentEvent(
+            event_type="poller",
+            prompt="check feed",
+            channel_id=None,
+            scheduler_name=None,
+        ),
+    )
+
+    assert len(client.presence_calls) >= 1
+    assert "poller" in client.presence_calls[0]["activity"].name
