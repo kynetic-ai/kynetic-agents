@@ -315,10 +315,8 @@ class SchedulerMixin:
             return
 
         stdout_text = stdout_bytes.decode("utf-8", errors="replace").strip()
-        if not stdout_text:
-            return
-
         event_count = 0
+
         for line in stdout_text.splitlines():
             line = line.strip()
             if not line:
@@ -355,6 +353,8 @@ class SchedulerMixin:
             )
             event_count += 1
 
+        # Always log completion — events_emitted=0 is the normal "nothing new" case
+        # and is the only signal that a monitor poller ran successfully.
         self.log_event(
             "poller_complete",
             name=poller.name,
