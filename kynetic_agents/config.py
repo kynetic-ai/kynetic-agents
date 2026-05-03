@@ -219,6 +219,7 @@ class AppConfig:
     mempalace_path: str | None = None
     mempalace_writer: bool = False
     mempalace_channels: list[str] = field(default_factory=list)
+    fetch_url_max_bytes: int = 2_000_000
 
     @property
     def writable_dirs(self) -> list[str]:
@@ -321,6 +322,7 @@ def load_config(layout: RepoLayout) -> AppConfig:
         else None,
         mempalace_writer=bool(loaded.get("mempalace_writer", False)),
         mempalace_channels=_parse_home_channels(loaded.get("mempalace_channels")),
+        fetch_url_max_bytes=max(1, int(loaded.get("fetch_url_max_bytes", 2_000_000))),
     )
 
 

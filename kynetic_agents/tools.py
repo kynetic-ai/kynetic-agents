@@ -924,11 +924,13 @@ class ToolsMixin:
             )
             return f"Wrote {resolved} ({len(content)} chars)"
 
+        _fetch_url_max_bytes_default = self.config.fetch_url_max_bytes
+
         @tool("fetch_url")
         async def fetch_url(
             url: str,
             timeout_seconds: int = 20,
-            max_bytes: int = 2_000_000,
+            max_bytes: int = _fetch_url_max_bytes_default,
         ) -> str:
             """Download a URL to a session cache file and return its path + metadata."""
             normalized_url = url.strip()
