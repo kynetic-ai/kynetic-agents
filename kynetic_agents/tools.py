@@ -1446,6 +1446,16 @@ class ToolsMixin:
             names = [p.name for p in pollers]
             return f"Reloaded. {len(pollers)} poller(s) registered: {', '.join(names)}"
 
+        @tool("reload_hooks")
+        def reload_hooks() -> str:
+            """Reload all command hooks from skills/*/hooks.json files. Call this after installing or updating a skill that includes hooks."""
+            hooks = self.hooks.discover()
+            self.log_event("tool_call", tool="reload_hooks", count=len(hooks))
+            if not hooks:
+                return "Reloaded. No hooks found."
+            names = [hook.name for hook in hooks]
+            return f"Reloaded. {len(hooks)} hook(s) registered: {', '.join(names)}"
+
         @tool("lookup")
         def lookup(query: str) -> str:
             """Look up a Discord user or channel by name or ID.  Returns matching entries with their IDs, mention format, and type.  Use this when you need to find a channel_id or user mention format."""
@@ -1640,6 +1650,7 @@ class ToolsMixin:
             add_schedule,
             remove_schedule,
             reload_pollers,
+            reload_hooks,
             climb_register,
             climb_unregister,
             climb_status,

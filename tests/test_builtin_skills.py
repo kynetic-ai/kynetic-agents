@@ -312,3 +312,16 @@ def test_bootstrap_cleans_legacy_builtin_script_copies(tmp_path: Path) -> None:
 
     bootstrap_home_repo(layout, checkpoint_text="checkpoint")
     assert not legacy_script.exists()
+
+
+def test_materialized_builtin_skills_include_hook_creator_skill() -> None:
+    root = materialize_builtin_skills()
+
+    skill_path = root / "hook-creator" / "SKILL.md"
+
+    assert skill_path.exists()
+    skill_text = skill_path.read_text(encoding="utf-8")
+    assert "name: hook-creator" in skill_text
+    assert "hooks.json" in skill_text
+    assert "pre_prompt" in skill_text
+    assert "include_conversation" in skill_text
