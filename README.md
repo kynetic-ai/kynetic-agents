@@ -235,6 +235,8 @@ uv add -U kynetic-agents
 ```yaml
 model: MiniMax-M2.5
 model_max_retries: 6
+model_max_output_tokens: 32768
+model_request_timeout_seconds: 600
 journal_entries_in_prompt: 90
 discord_messages_in_prompt: 10
 discord_token_env: DISCORD_TOKEN
