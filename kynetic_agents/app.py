@@ -446,6 +446,10 @@ class OpenStrixApp(DiscordMixin, SchedulerMixin, ToolsMixin):
         self.mcp_manager: MCPManager | None = None
         self._mempalace_write_queue: asyncio.Queue[MempalaceWriteItem] | None = None
         self._mempalace_session: Any | None = None
+        # Tools/flags used to (re)build the main agent, stashed so per-job
+        # scheduler agents (model overrides) can be built with the same toolset.
+        self._agent_extra_tools: list[Any] = []
+        self._agent_has_mempalace: bool = False
         self.agent = self._create_agent()
 
     def _load_chat_history(self) -> None:
@@ -510,8 +514,22 @@ class OpenStrixApp(DiscordMixin, SchedulerMixin, ToolsMixin):
                         emoji=emoji,
                     )
 
-    def _create_agent(self, extra_tools: list[Any] | None = None, has_mempalace: bool = False) -> Any:
-        """Build the LangGraph agent with all tools."""
+    def _create_agent(
+        self,
+        extra_tools: list[Any] | None = None,
+        has_mempalace: bool = False,
+        model_override: str | None = None,
+    ) -> Any:
+        """Build the LangGraph agent with all tools.
+
+        Args:
+            extra_tools: Additional tools to register (e.g. MCP tools).
+            has_mempalace: Whether mempalace tools are present.
+            model_override: Provider-qualified model string to use instead of
+                ``self.config.model``.  Scheduler jobs that set ``model:`` in
+                ``scheduler.yaml`` use this to route low-cost tasks to a
+                cheaper model class.
+        """
         mutable_backend = LoggingWriteGuardBackend(
             root_dir=self.home,
             writable_dirs=self.config.writable_dirs,
@@ -523,7 +541,8 @@ class OpenStrixApp(DiscordMixin, SchedulerMixin, ToolsMixin):
             default=mutable_backend,
             routes={BUILTIN_SKILLS_ROUTE: builtin_backend},
         )
-        model_name = _model_for_deep_agents(self.config.model)
+        raw_model = model_override if model_override else self.config.model
+        model_name = _model_for_deep_agents(raw_model)
         model = _build_chat_model(
             model_name,
             max_retries=self.config.model_max_retries,
@@ -988,6 +1007,23 @@ class OpenStrixApp(DiscordMixin, SchedulerMixin, ToolsMixin):
                 errors.append(f"{path.name}: expected a YAML mapping, got {type(loaded).__name__}")
         return errors
 
+    def _get_agent_for_scheduler_model(self, model_name: str) -> Any:
+        """Build a fresh agent for a per-job model override.
+
+        A new agent is built on each scheduler firing — build cost is a few ms
+        and is acceptable for jobs that fire no faster than once per minute.
+        Caching is intentionally omitted: open-strix does not cache as a rule
+        and the precedent cost of an idiom-of-one cache exceeds the build savings.
+
+        The per-job agent reuses the same MCP tools and mempalace state as the
+        main agent so a model override does not silently drop the toolset.
+        """
+        return self._create_agent(
+            extra_tools=self._agent_extra_tools,
+            has_mempalace=self._agent_has_mempalace,
+            model_override=model_name,
+        )
+
     def _is_mempalace_channel(self, channel_id: str) -> bool:
         channels = self.config.mempalace_channels
         if not channels:
@@ -1052,10 +1088,17 @@ class OpenStrixApp(DiscordMixin, SchedulerMixin, ToolsMixin):
             channel_id=event.channel_id,
             scheduler_name=event.scheduler_name,
         )
+        agent = (
+            self._get_agent_for_scheduler_model(
+                _model_for_deep_agents(event.scheduler_model)
+            )
+            if event.scheduler_model
+            else self.agent
+        )
         try:
             invoke_start = time.monotonic()
             async with self._typing_indicator(event):
-                result = await self.agent.ainvoke({"messages": [HumanMessage(content=prompt)]})
+                result = await agent.ainvoke({"messages": [HumanMessage(content=prompt)]})
             timings["agent_invoke_seconds"] = time.monotonic() - invoke_start
             self._log_agent_trace(result)
             _usage = _extract_usage(result)
@@ -1123,7 +1166,7 @@ class OpenStrixApp(DiscordMixin, SchedulerMixin, ToolsMixin):
                 )
                 repair_start = time.monotonic()
                 async with self._typing_indicator(event):
-                    result = await self.agent.ainvoke(
+                    result = await agent.ainvoke(
                         {"messages": [HumanMessage(content=repair_prompt)]}
                     )
                 timings["block_repair_invoke_seconds"] = time.monotonic() - repair_start
@@ -1314,6 +1357,8 @@ class OpenStrixApp(DiscordMixin, SchedulerMixin, ToolsMixin):
                 log_fn=self.log_event,
             )
             if mcp_tools:
+                self._agent_extra_tools = mcp_tools
+                self._agent_has_mempalace = bool(self.config.mempalace_path)
                 self.agent = self._create_agent(extra_tools=mcp_tools, has_mempalace=bool(self.config.mempalace_path))
                 print(
                     f"[kynetic-agents] Agent recreated with {len(mcp_tools)} MCP tool(s)",
