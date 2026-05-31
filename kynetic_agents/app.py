@@ -57,7 +57,12 @@ from .discord import (
 from .hooks import HookManager
 from .models import AgentEvent, MempalaceWriteItem
 from .prompts import DEFAULT_CHECKPOINT, MEMPALACE_SECTION, SYSTEM_PROMPT, render_folders_section, render_turn_prompt
-from .readonly_backend import BUILTIN_SKILLS_ROUTE, LoggingWriteGuardBackend, build_builtin_skills_backend
+from .readonly_backend import (
+    BUILTIN_SKILLS_ROUTE,
+    LoggingWriteGuardBackend,
+    WriteGuardBackend,
+    build_builtin_skills_backend,
+)
 from .scheduler import SchedulerJob, SchedulerMixin
 from .shell_jobs import ShellJobRegistry
 from .supervisor import Supervisor

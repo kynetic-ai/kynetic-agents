@@ -62,8 +62,6 @@ class TestAppConfigFolders:
         assert config.folders == DEFAULT_FOLDERS
         assert config.model_max_retries == DEFAULT_MODEL_MAX_RETRIES
         assert config.name == ""
-        assert config.web_ui_host == "127.0.0.1"
-        assert config.web_ui_channel_id == "local-web"
 
     def test_writable_dirs(self) -> None:
         config = AppConfig(folders={"state": "rw", "skills": "rw", "blocks": "ro"})
@@ -84,9 +82,6 @@ class TestLoadConfigFolders:
             "model": "test-model",
             "model_max_retries": 9,
             "folders": {"state": "rw", "data": "ro"},
-            "web_ui_port": 8081,
-            "web_ui_host": "0.0.0.0",
-            "web_ui_channel_id": "local-web",
         }
         config_file = tmp_path / "config.yaml"
         config_file.write_text(yaml.safe_dump(config_data), encoding="utf-8")
@@ -95,9 +90,6 @@ class TestLoadConfigFolders:
         config = load_config(layout)
         assert config.folders == {"state": "rw", "data": "ro"}
         assert config.model_max_retries == 9
-        assert config.web_ui_port == 8081
-        assert config.web_ui_host == "0.0.0.0"
-        assert config.web_ui_channel_id == "local-web"
 
     def test_loads_name_from_config(self, tmp_path: Path) -> None:
         config_data = {
@@ -176,8 +168,6 @@ class TestBootstrapCreatesFolders:
         assert loaded["model_max_retries"] == DEFAULT_MODEL_MAX_RETRIES
         assert "folders" in loaded
         assert loaded["folders"] == DEFAULT_FOLDERS
-        assert loaded["web_ui_host"] == "127.0.0.1"
-        assert loaded["web_ui_channel_id"] == "local-web"
 
 
 class TestWriteGuardFromConfig:
