@@ -288,3 +288,162 @@ def test_load_events_reads_multiple_siblings_in_order(tmp_path: Path) -> None:
     types = {e["type"] for e in result}
     assert "tool_call" in types
     assert "agent_invoke_start" in types
+
+
+# --- cost formula unit tests --------------------------------------------------
+# Cost events use kynetic's llm_usage schema (cache_read_tokens /
+# cache_creation_tokens, emitted by _extract_usage).
+
+
+def test_turn_cost_usd_sonnet_cache_aware() -> None:
+    """$0.5715 worked example: 1M input, 900K cache-read, 0 cache-creation, 100 output tokens."""
+    from kynetic_agents.ops_dashboard import _turn_cost_usd
+
+    ev = {
+        "model": "claude-sonnet-4-6",
+        "input_tokens": 1_000_000,
+        "cache_read_tokens": 900_000,
+        "cache_creation_tokens": 0,
+        "output_tokens": 100,
+    }
+    # fresh_input = 1_000_000 - 900_000 - 0 = 100_000
+    # cost = 100_000 * $3/M + 900_000 * $0.30/M + 0 * $3.75/M + 100 * $15/M
+    #      = $0.30 + $0.27 + $0 + $0.0015
+    #      = $0.5715
+    assert round(_turn_cost_usd(ev), 4) == 0.5715
+
+
+def test_turn_cost_usd_deepseek_v4_pro() -> None:
+    """DeepSeek V4 Pro: 1M input, 900K cache-read, 0 cache-creation, 100 output."""
+    from kynetic_agents.ops_dashboard import _turn_cost_usd
+
+    ev = {
+        "model": "deepseek-v4-pro",
+        "input_tokens": 1_000_000,
+        "cache_read_tokens": 900_000,
+        "cache_creation_tokens": 0,
+        "output_tokens": 100,
+    }
+    # fresh_input = 100_000
+    # cost = 100_000*$1.74/M + 900_000*$0.0145/M + 0 + 100*$3.48/M
+    #      = $0.174 + $0.01305 + $0.000348 = $0.187398
+    assert round(_turn_cost_usd(ev), 4) == 0.1874
+
+
+def test_turn_cost_usd_unknown_model_defaults_to_deepseek_v4_pro() -> None:
+    """An unrecognized model is priced at the default (deepseek-v4-pro) rate."""
+    from kynetic_agents.ops_dashboard import _turn_cost_usd
+
+    base = {
+        "input_tokens": 1_000_000,
+        "cache_read_tokens": 900_000,
+        "cache_creation_tokens": 0,
+        "output_tokens": 100,
+    }
+    unknown = dict(base, model="some-mystery-model")
+    deepseek = dict(base, model="deepseek-v4-pro")
+    assert _turn_cost_usd(unknown) == _turn_cost_usd(deepseek)
+
+
+def test_turn_cost_usd_provider_prefix_stripped() -> None:
+    """model field may arrive as 'anthropic:claude-sonnet-4-6' — should price correctly."""
+    from kynetic_agents.ops_dashboard import _turn_cost_usd
+
+    ev_prefixed = {
+        "model": "anthropic:claude-sonnet-4-6",
+        "input_tokens": 1_000_000,
+        "cache_read_tokens": 900_000,
+        "cache_creation_tokens": 0,
+        "output_tokens": 100,
+    }
+    ev_bare = dict(ev_prefixed, model="claude-sonnet-4-6")
+    assert _turn_cost_usd(ev_prefixed) == _turn_cost_usd(ev_bare)
+
+
+def test_turn_cost_usd_per_job_attribution(tmp_path: Path) -> None:
+    """Two llm_usage events paired with agent_invoke_start rows → correct per-job cost."""
+    from kynetic_agents.ops_dashboard import _compute_cost_stats
+
+    now = datetime.now(timezone.utc)
+
+    def _ts_dt(offset_seconds: float) -> datetime:
+        return now - timedelta(seconds=offset_seconds)
+
+    # Simulate two turns: one discord_message, one rss-daily-scan
+    llu_items = [
+        {
+            "sid": "s1",
+            "ts": _ts_dt(10),
+            "cost": 0.5715,
+            "model": "claude-sonnet-4-6",
+            "input_tokens": 1_000_000,
+            "cache_read": 900_000,
+        },
+        {
+            "sid": "s2",
+            "ts": _ts_dt(5),
+            "cost": 0.01,
+            "model": "claude-sonnet-4-6",
+            "input_tokens": 10_000,
+            "cache_read": 5_000,
+        },
+    ]
+
+    # agent_invoke_start rows (session_id + timestamps for join)
+    session_id_seen: set[str] = {"s1", "s2"}
+
+    raw_events = [
+        {
+            "_ts": _ts_dt(11),
+            "type": "agent_invoke_start",
+            "session_id": "s1",
+            "source_event_type": "discord_message",
+            "scheduler_name": None,
+        },
+        {
+            "_ts": _ts_dt(6),
+            "type": "agent_invoke_start",
+            "session_id": "s2",
+            "source_event_type": "poller",
+            "scheduler_name": "rss-daily-scan",
+        },
+    ]
+
+    stats = _compute_cost_stats(llu_items, session_id_seen, raw_events)
+
+    assert stats is not None
+    per_job = {row["job"]: row for row in stats["per_job"]}
+    assert "discord_message" in per_job, (
+        f"Expected discord_message job, got: {list(per_job.keys())}"
+    )
+    assert "rss-daily-scan" in per_job, (
+        f"Expected rss-daily-scan job, got: {list(per_job.keys())}"
+    )
+    assert abs(per_job["discord_message"]["cost_usd"] - 0.5715) < 1e-6, (
+        f'discord_message cost mismatch: {per_job["discord_message"]["cost_usd"]}'
+    )
+    assert abs(per_job["rss-daily-scan"]["cost_usd"] - 0.01) < 1e-6, (
+        f'rss-daily-scan cost mismatch: {per_job["rss-daily-scan"]["cost_usd"]}'
+    )
+    total = stats["total_cost_usd"]
+    assert abs(total - (0.5715 + 0.01)) < 1e-6, f"Total cost mismatch: {total}"
+
+
+def test_compute_stats_includes_cost_from_llm_usage_events() -> None:
+    """compute_stats surfaces a cost block computed from llm_usage events."""
+    from kynetic_agents.ops_dashboard import _parse_ts
+
+    ts = _ts(1)
+    events = [
+        {"type": "agent_invoke_start", "timestamp": ts, "session_id": "s1",
+         "source_event_type": "discord_message", "_ts": _parse_ts(ts)},
+        {"type": "llm_usage", "timestamp": ts, "session_id": "s1",
+         "model": "deepseek-v4-pro", "input_tokens": 1_000_000,
+         "cache_read_tokens": 900_000, "cache_creation_tokens": 0,
+         "output_tokens": 100, "_ts": _parse_ts(ts)},
+    ]
+    stats = compute_stats(events, days=7)
+    assert "cost" in stats
+    assert stats["cost"]["total_turns"] == 1
+    assert round(stats["cost"]["total_cost_usd"], 4) == 0.1874
+    assert stats["cost"]["per_job"][0]["job"] == "discord_message"

@@ -1139,6 +1139,7 @@ class OpenStrixApp(DiscordMixin, SchedulerMixin, ToolsMixin):
                     "llm_usage",
                     source_event_type=event.event_type,
                     scheduler_name=event.scheduler_name,
+                    model=event.scheduler_model or self.config.model,
                     **_usage,
                 )
             self._write_session_log(event, prompt, result)
@@ -1210,6 +1211,7 @@ class OpenStrixApp(DiscordMixin, SchedulerMixin, ToolsMixin):
                         "llm_usage",
                         source_event_type="repair",
                         scheduler_name=event.scheduler_name,
+                        model=event.scheduler_model or self.config.model,
                         **_repair_usage,
                     )
                 # Check again — log but don't loop
