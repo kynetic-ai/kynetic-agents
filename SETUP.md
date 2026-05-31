@@ -44,6 +44,29 @@ gh auth status
 
 Official docs: https://cli.github.com/
 
+### Install attachment-handling tools (optional)
+
+The built-in `view-attachment` skill inspects image, PDF, and document attachments by shelling out to system CLI tools. These are **not** bundled with the `kynetic-agents` package — they come from the host. Without them, the skill still runs but its image options silently no-op (it falls back to file metadata and asking the human).
+
+| Tool | Provides | Used for |
+|---|---|---|
+| `tesseract` | OCR | extracting text from screenshots/photos |
+| `convert` / `identify` (ImageMagick) | image metadata, conversion, pixel sampling | dimensions, format, simple-graphic tracing |
+| `potrace` | bitmap → SVG tracing | reasoning about charts/line art |
+| `pdftotext` (poppler-utils) | PDF text extraction | reading PDF attachments |
+
+```bash
+# Ubuntu / Debian
+sudo apt install tesseract-ocr imagemagick potrace poppler-utils
+```
+
+```bash
+# macOS
+brew install tesseract imagemagick potrace poppler
+```
+
+Vision note: attachments are always passed to the model as **file paths**, never inlined as image content — so even vision-capable models rely on this skill (and these tools) to inspect attachments. There is no config knob to enable inline/native image input. See `kynetic_agents/discord.py` (`_save_attachments`) for the rationale.
+
 ## Quick start
 
 ```bash
@@ -103,7 +126,7 @@ git commit -m "Initial commit"
 git push -u origin HEAD
 ```
 
-**Manual fallback (web UI):**
+**Manual fallback (GitHub website):**
 
 1. Create a new **private** empty repo on GitHub (no README, no `.gitignore`, no license).
 2. In your project directory:
@@ -182,45 +205,21 @@ Moonshot docs:
 
 Any model with an Anthropic-compatible API works. Just set `ANTHROPIC_BASE_URL` and `ANTHROPIC_API_KEY`.
 
-## Choosing an interface
+## Interfaces
 
-kynetic-agents supports two interfaces. You can use either or both.
+kynetic-agents reaches you through three interfaces:
 
-| | Web UI | Discord |
-|---|---|---|
-| **Setup time** | ~30 seconds | ~15 minutes |
-| **Requires** | Just `config.yaml` | Bot token + server + permissions |
-| **Best for** | Getting started, local dev, 1:1 chat | Notifications, mobile access, multi-channel, scheduled job alerts |
-| **Limitations** | Browser only, no push notifications | Requires Discord account and server setup |
+| | Discord | stdin | REST API |
+|---|---|---|---|
+| **Setup** | Bot token + server + permissions | None | Set `api_port` in `config.yaml` |
+| **Best for** | Notifications, mobile access, multi-channel, scheduled job alerts | Quick local testing | External scripts, pollers, cross-agent wrappers |
+| **How** | See [Discord setup](#discord-setup) | Runs automatically when no `DISCORD_TOKEN` is configured | Loopback HTTP on `127.0.0.1:<api_port>` (see [docs/events.md](docs/events.md)) |
 
-**Recommendation:** Start with the web UI. It's the fastest way to begin growing your agent. Add Discord later when you want the agent to reach you proactively (scheduled jobs, reminders, etc.).
-
-## Web UI setup
-
-The web UI is **enabled by default** on port 8084. Run `uv run kynetic-agents` and open `http://127.0.0.1:8084/`. Done.
-
-The web UI supports text messages, image display, file attachments (drag, paste, or pick), and emoji reactions. It uses the same tools and memory as Discord — switching between them later doesn't lose anything.
-
-**Access from other devices** (phone, tablet, another machine on your network):
-
-```yaml
-web_ui_port: 8084
-web_ui_host: 0.0.0.0
-```
-
-Then open `http://<your-machine-ip>:8084/` from the other device.
-
-**Full config options:**
-
-| Key | Default | Purpose |
-|---|---|---|
-| `web_ui_port` | `8084` | Port number. Set `0` to disable. |
-| `web_ui_host` | `127.0.0.1` | Bind address. `0.0.0.0` for network access. |
-| `web_ui_channel_id` | `local-web` | Synthetic channel ID for web messages. |
+Discord is the primary interface. If no Discord token is set, the agent falls back to **stdin mode** — type prompts directly in the terminal — which is handy for a first run. The REST API is a loopback-only event intake for automation, not a chat UI.
 
 ## Discord setup
 
-Optional. Skip this entirely if you're using the web UI.
+The recommended interface for day-to-day use.
 
 Use Discord's [Developer Portal](https://discord.com/developers/applications):
 
@@ -257,9 +256,6 @@ discord_messages_in_prompt: 10
 discord_token_env: DISCORD_TOKEN
 always_respond_bot_ids: []
 api_port: 0
-web_ui_port: 8084
-web_ui_host: 127.0.0.1
-web_ui_channel_id: local-web
 folders:
   state: rw
   skills: rw
@@ -277,9 +273,6 @@ folders:
 | `discord_token_env` | Env var name for Discord token |
 | `always_respond_bot_ids` | Bot author IDs the agent responds to |
 | `api_port` | Loopback REST API port (`0` disables it) |
-| `web_ui_port` | Local web chat port (default `8084`; `0` disables it) |
-| `web_ui_host` | Bind host for the web UI (default `127.0.0.1`) |
-| `web_ui_channel_id` | Synthetic channel ID used by the built-in web chat |
 | `folders` | Map of folder names to access mode (`rw` or `ro`) |
 | `mcp_servers` | List of MCP server configs (see below) |
 

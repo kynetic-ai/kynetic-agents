@@ -5,7 +5,7 @@ description: Run shell commands in the background with file-backed output captur
 
 # Long-Running Jobs
 
-Some commands take minutes or hours. Rather than blocking on them, spawn them with `async_mode=True`. The harness owns the process — captures stdout/stderr to files, surfaces the job in the web UI, and **fires a completion event back into the agent's queue when the subprocess exits.**
+Some commands take minutes or hours. Rather than blocking on them, spawn them with `async_mode=True`. The harness owns the process — captures stdout/stderr to files, registers the job so it stays queryable, and **fires a completion event back into the agent's queue when the subprocess exits.**
 
 The completion event is a fresh turn: journal, memory blocks, and recent messages get rebuilt from disk. There is no in-context state to preserve. Whatever you need to remember when the job finishes has to live somewhere durable (journal entry, state file, the command itself) **before** you spawn.
 
@@ -34,7 +34,7 @@ That's it. The harness:
 
 1. Spawns the command in its own process group, file-backs stdout/stderr
 2. Returns immediately with `Spawned async job j_abc123 (pid 12345)`
-3. Surfaces the job in the web UI with a live status indicator
+3. Registers the job so it's queryable via `shell_jobs_list()` and the `/api/shell-jobs` REST endpoint
 4. When the subprocess exits, fires a `shell_job_complete` event that wakes the agent with a prompt containing `job_id`, `command`, `exit_code`, `elapsed`, and the tail (~4KB) of each stream
 
 You keep working in the current turn. The completion event arrives as a separate wake-up.
@@ -43,7 +43,7 @@ You keep working in the current turn. The completion event arrives as a separate
 
 While a job is running you have three options — and one of them isn't a tool call:
 
-- **Web UI** — the user can see running jobs at a glance with elapsed time and status. If the user's watching, they already know.
+- **REST API** — when `api_port` is set, `GET /api/shell-jobs` lists running jobs with elapsed time and status, for an external dashboard or the operator. If someone's watching that, they already know.
 - `shell_jobs_list()` — every job the registry knows about (running + recently finished), with `job_id`, `pid`, `status`, `elapsed_seconds`, and `seconds_since_last_signal`.
 - `shell_job_output(job_id, tail_lines=N, stream="stdout"|"stderr"|"both")` — tail current output without waiting for completion. Useful for sanity-checking that a build is making progress vs hung.
 
@@ -171,7 +171,7 @@ echo "Launched (pid=$!). Output: $OUTPUT_FILE"
 
 Then poll with `grep EXIT_CODE= $OUTPUT_FILE`. There is no completion event in this mode — you have to come back and check, or wire up your own callback (e.g., `curl` to an HTTP endpoint at the end of the bash block).
 
-**Inside the open-strix harness, prefer `async_mode=True`.** The manual pattern doesn't register with `shell_jobs_list`, doesn't surface in the web UI, and won't wake the agent.
+**Inside the kynetic-agents harness, prefer `async_mode=True`.** The manual pattern doesn't register with `shell_jobs_list`, isn't queryable over the REST API, and won't wake the agent.
 
 ## Key Gotchas
 

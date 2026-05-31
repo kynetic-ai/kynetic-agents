@@ -3,16 +3,16 @@
 When the shell tool is invoked with async_mode=True, the command is spawned
 via subprocess.Popen, registered here, and its stdout/stderr are captured
 to files on disk via background drainer threads. The LLM can then use
-shell_jobs_list / shell_job_output tools to check on progress, and the
-UI can surface running jobs by polling a field in the web UI payload.
+shell_jobs_list / shell_job_output tools to check on progress, and external
+clients can poll the registry over the REST API (`GET /api/shell-jobs`).
 
 Design notes:
 - No lifecycle cleanup. Kills happen via bash/powershell (the agent or user
   decides what signal to use). Finished jobs linger in the registry so the
   LLM can still retrieve their final output.
 - No algedonic signals. The tool description is the only nudge toward async.
-- Running jobs are visible to the UI immediately. Finished jobs only linger in
-  the UI if they ran long enough to be worth surfacing.
+- Running jobs appear in the registry immediately. Finished jobs only linger
+  if they ran long enough to be worth surfacing.
 """
 
 from __future__ import annotations

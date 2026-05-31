@@ -224,6 +224,8 @@ uv run kynetic-agents
 
 The setup command handles everything: directory structure, git init, GitHub repo creation (with `--github`), service files for your OS, and a walkthrough for model/Discord configuration.
 
+Optionally, install `tesseract-ocr imagemagick potrace poppler-utils` on the host so the built-in `view-attachment` skill can inspect image and PDF attachments — see [SETUP.md](SETUP.md#install-attachment-handling-tools-optional).
+
 See [SETUP.md](SETUP.md) for detailed instructions on environment variables, model configuration, Discord setup, and deployment options.
 
 ## Upgrading
