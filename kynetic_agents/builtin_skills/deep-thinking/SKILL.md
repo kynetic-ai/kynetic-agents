@@ -11,7 +11,7 @@ genuinely need careful, multi-step reasoning, you can delegate to a separate
 
 ## Availability
 
-The `deep-thinker` subagent only exists when the operator sets `KYNETIC_THINKING=1`.
+The `deep-thinker` subagent only exists when the operator sets `thinking_enabled: true` in `config.yaml`.
 Check your `task` tool: if `deep-thinker` is listed as a target, delegation is
 available. If it is NOT listed, the flag is off — reason inline as usual and do not
 mention the subagent.

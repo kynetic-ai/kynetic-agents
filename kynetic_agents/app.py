@@ -629,7 +629,7 @@ class OpenStrixApp(DiscordMixin, SchedulerMixin, ToolsMixin):
         max_tokens: int,
         request_timeout_seconds: int,
     ) -> SubAgent | None:
-        """Build the opt-in deep-thinking subagent (KYNETIC_THINKING=1).
+        """Build the opt-in deep-thinking subagent (thinking_enabled in config).
 
         Returns a SubAgent whose model has extended thinking enabled, so the
         main agent (which runs thinking-off) can delegate hard sub-problems to

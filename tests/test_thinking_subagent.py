@@ -1,4 +1,4 @@
-"""Tests for the opt-in extended-thinking subagent (KYNETIC_THINKING=1).
+"""Tests for the opt-in extended-thinking subagent (thinking_enabled in config).
 
 When the flag is set, `_build_chat_model(..., thinking=True)` enables Anthropic's
 extended-thinking parameter (honored by DeepSeek's Anthropic-compatible endpoint,
@@ -58,29 +58,31 @@ def test_build_chat_model_enables_thinking(monkeypatch) -> None:
     assert captured["thinking"]["budget_tokens"] < captured["max_tokens"]
 
 
-def test_thinking_flag_defaults_off(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.delenv("KYNETIC_THINKING", raising=False)
+def test_thinking_flag_defaults_off_when_missing(tmp_path: Path) -> None:
     config_file = tmp_path / "config.yaml"
     config_file.write_text(yaml.safe_dump({"model": "deepseek-v4-pro"}), encoding="utf-8")
     layout = RepoLayout(home=tmp_path, state_dir_name="state")
     assert load_config(layout).thinking_enabled is False
 
 
-def test_thinking_flag_enabled_by_env(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setenv("KYNETIC_THINKING", "1")
+def test_thinking_flag_enabled_via_config(tmp_path: Path) -> None:
     config_file = tmp_path / "config.yaml"
-    config_file.write_text(yaml.safe_dump({"model": "deepseek-v4-pro"}), encoding="utf-8")
+    config_file.write_text(
+        yaml.safe_dump({"model": "deepseek-v4-pro", "thinking_enabled": True}),
+        encoding="utf-8",
+    )
     layout = RepoLayout(home=tmp_path, state_dir_name="state")
     assert load_config(layout).thinking_enabled is True
 
 
-def test_thinking_flag_requires_exact_one(tmp_path: Path, monkeypatch) -> None:
+def test_thinking_flag_disabled_via_config(tmp_path: Path) -> None:
     config_file = tmp_path / "config.yaml"
-    config_file.write_text(yaml.safe_dump({"model": "deepseek-v4-pro"}), encoding="utf-8")
+    config_file.write_text(
+        yaml.safe_dump({"model": "deepseek-v4-pro", "thinking_enabled": False}),
+        encoding="utf-8",
+    )
     layout = RepoLayout(home=tmp_path, state_dir_name="state")
-    for value in ("0", "true", "yes", ""):
-        monkeypatch.setenv("KYNETIC_THINKING", value)
-        assert load_config(layout).thinking_enabled is False
+    assert load_config(layout).thinking_enabled is False
 
 
 def test_deep_thinker_absent_when_flag_off() -> None:
