@@ -148,6 +148,7 @@ def _build_chat_model(
     max_retries: int = DEFAULT_MODEL_MAX_RETRIES,
     max_tokens: int = DEFAULT_MODEL_MAX_OUTPUT_TOKENS,
     request_timeout_seconds: int = DEFAULT_MODEL_REQUEST_TIMEOUT_SECONDS,
+    thinking: bool = False,
 ) -> Any:
     # langchain-anthropic falls back to 4096 max output tokens for any model
     # not in its Claude-only profile table. MiniMax-M2.5 triggers that fallback,
@@ -158,6 +159,13 @@ def _build_chat_model(
         "max_tokens": max(1, int(max_tokens)),
         "timeout": max(1, int(request_timeout_seconds)),
     }
+    if thinking:
+        # DeepSeek's Anthropic-compatible endpoint accepts the `thinking` param
+        # but ignores `budget_tokens` (it self-scales reasoning depth). The value
+        # is kept < max_tokens so langchain-anthropic's client-side validation
+        # passes. Extended thinking also requires temperature=1.
+        model_init_params["thinking"] = {"type": "enabled", "budget_tokens": 4096}
+        model_init_params["temperature"] = 1
     if model_name.startswith("openai:"):
         model_init_params["use_responses_api"] = True
     return init_chat_model(model_name, **model_init_params)
@@ -580,6 +588,13 @@ class OpenStrixApp(DiscordMixin, SchedulerMixin, ToolsMixin):
         tools = self.hooks.wrap_tools(tools)
 
         subagents = self._build_subagents()
+        deep_thinker = self._build_deep_thinker_subagent(
+            model_name,
+            max_tokens=self.config.model_max_output_tokens,
+            request_timeout_seconds=self.config.model_request_timeout_seconds,
+        )
+        if deep_thinker is not None:
+            subagents.append(deep_thinker)
 
         return create_deep_agent(
             model=model,
@@ -606,6 +621,56 @@ class OpenStrixApp(DiscordMixin, SchedulerMixin, ToolsMixin):
                 spec["model"] = _model_for_deep_agents(cfg.model)
             specs.append(spec)
         return specs
+
+    def _build_deep_thinker_subagent(
+        self,
+        model_name: str,
+        *,
+        max_tokens: int,
+        request_timeout_seconds: int,
+    ) -> SubAgent | None:
+        """Build the opt-in deep-thinking subagent (KYNETIC_THINKING=1).
+
+        Returns a SubAgent whose model has extended thinking enabled, so the
+        main agent (which runs thinking-off) can delegate hard sub-problems to
+        it via the ``task`` tool. Returns ``None`` when the flag is off.
+
+        The model is passed as a constructed instance (not a ``provider:model``
+        string) so it can carry the ``thinking`` parameter; deepagents uses the
+        instance directly. Tools are inherited from the main agent so the
+        thinker can read files and run code on challenging coding problems.
+        """
+        if not self.config.thinking_enabled:
+            return None
+        model = _build_chat_model(
+            model_name,
+            max_retries=self.config.model_max_retries,
+            max_tokens=max_tokens,
+            request_timeout_seconds=request_timeout_seconds,
+            thinking=True,
+        )
+        spec: SubAgent = {
+            "name": "deep-thinker",
+            "description": (
+                "Delegate here for problems that need careful, multi-step "
+                "reasoning: tricky algorithm or systems design, debugging "
+                "subtle logic, proofs, planning under ambiguity, or weighing "
+                "non-obvious trade-offs. Use it for CHALLENGING coding "
+                "problems; handle simple/routine coding inline yourself. "
+                "Pass the full problem and relevant context; it returns a "
+                "reasoned answer."
+            ),
+            "system_prompt": (
+                "You are a deep-reasoning specialist. Think rigorously and "
+                "step by step about the problem before answering. For coding "
+                "problems, reason about edge cases, complexity, and "
+                "correctness, and inspect relevant files when useful. Return a "
+                "clear, actionable final answer (plus the key reasoning that "
+                "supports it) — not your entire scratch work."
+            ),
+            "model": model,
+        }
+        return spec
 
     def _skill_root_for_source(self, source: str) -> Path | None:
         if source == "/skills":

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -207,6 +208,10 @@ class AppConfig:
     model_max_retries: int = DEFAULT_MODEL_MAX_RETRIES
     model_max_output_tokens: int = DEFAULT_MODEL_MAX_OUTPUT_TOKENS
     model_request_timeout_seconds: int = DEFAULT_MODEL_REQUEST_TIMEOUT_SECONDS
+    # Opt-in via KYNETIC_THINKING=1. When set, a `deep-thinker` subagent backed
+    # by an extended-thinking model is registered so the main agent can delegate
+    # hard sub-problems. The main model itself stays thinking-off.
+    thinking_enabled: bool = False
     name: str = ""
     journal_entries_in_prompt: int = 90
     discord_messages_in_prompt: int = 10
@@ -317,6 +322,7 @@ def load_config(layout: RepoLayout) -> AppConfig:
                 )
             ),
         ),
+        thinking_enabled=os.getenv("KYNETIC_THINKING", "").strip() == "1",
         name=str(loaded.get("name", "")).strip(),
         journal_entries_in_prompt=int(loaded.get("journal_entries_in_prompt", 90)),
         discord_messages_in_prompt=int(loaded.get("discord_messages_in_prompt", 10)),
