@@ -160,13 +160,25 @@ def _build_chat_model(
         "max_tokens": max(1, int(max_tokens)),
         "timeout": max(1, int(request_timeout_seconds)),
     }
+    is_deepseek = "deepseek" in model_name.lower()
     if thinking:
         # DeepSeek's Anthropic-compatible endpoint accepts the `thinking` param
         # but ignores `budget_tokens` (it self-scales reasoning depth). The value
         # is kept < max_tokens so langchain-anthropic's client-side validation
-        # passes. Extended thinking also requires temperature=1.
+        # passes. `temperature` is supported on this Anthropic-compatible
+        # endpoint (range 0.0-2.0); extended thinking pins it to 1.
         model_init_params["thinking"] = {"type": "enabled", "budget_tokens": 4096}
         model_init_params["temperature"] = 1
+    elif is_deepseek:
+        # DeepSeek V4's Anthropic-compatible endpoint defaults thinking to ON
+        # (verified live), unlike real Anthropic where omitting the param means
+        # off. Leaving it off would let the main agent reason on every turn,
+        # contrary to the fast/cheap default we want. The Anthropic API accepts
+        # `{"type": "disabled"}` (honored by DeepSeek) to force it off. Scoped to
+        # DeepSeek: other providers (MiniMax, Moonshot, real Anthropic) already
+        # default thinking off when the param is omitted, and we have not
+        # verified they accept the disabled value.
+        model_init_params["thinking"] = {"type": "disabled"}
     if reasoning_effort:
         # DeepSeek V4's Anthropic-compatible endpoint controls reasoning depth
         # via `output_config.effort` ("high" | "max"); it ignores `budget_tokens`.
@@ -176,8 +188,6 @@ def _build_chat_model(
         model_init_params.setdefault("model_kwargs", {})["output_config"] = {
             "effort": reasoning_effort,
         }
-    if model_name.startswith("openai:"):
-        model_init_params["use_responses_api"] = True
     return init_chat_model(model_name, **model_init_params)
 
 

@@ -30,7 +30,7 @@ def _fake_app(thinking_enabled: bool) -> SimpleNamespace:
     return SimpleNamespace(config=config)
 
 
-def test_build_chat_model_omits_thinking_by_default(monkeypatch) -> None:
+def test_build_chat_model_disables_thinking_on_deepseek_main_path(monkeypatch) -> None:
     captured: dict[str, Any] = {}
 
     def fake_init_chat_model(model_name: str, **kwargs: Any) -> str:
@@ -40,8 +40,25 @@ def test_build_chat_model_omits_thinking_by_default(monkeypatch) -> None:
     monkeypatch.setattr(app_mod, "init_chat_model", fake_init_chat_model)
 
     app_mod._build_chat_model("anthropic:deepseek-v4-pro")
-    assert "thinking" not in captured
+    # DeepSeek V4 defaults thinking ON, so the non-thinking (main-agent) path
+    # must explicitly disable it rather than omit the param.
+    assert captured["thinking"] == {"type": "disabled"}
     assert "temperature" not in captured
+
+
+def test_build_chat_model_omits_thinking_on_non_deepseek_path(monkeypatch) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_init_chat_model(model_name: str, **kwargs: Any) -> str:
+        captured.update(kwargs)
+        return "stub-model"
+
+    monkeypatch.setattr(app_mod, "init_chat_model", fake_init_chat_model)
+
+    # Other Anthropic-compatible providers already default thinking off when the
+    # param is omitted; the disable is DeepSeek-scoped, so they get no param.
+    app_mod._build_chat_model("anthropic:MiniMax-M2.5")
+    assert "thinking" not in captured
 
 
 def test_build_chat_model_enables_thinking(monkeypatch) -> None:
