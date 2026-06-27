@@ -149,6 +149,7 @@ def _build_chat_model(
     max_tokens: int = DEFAULT_MODEL_MAX_OUTPUT_TOKENS,
     request_timeout_seconds: int = DEFAULT_MODEL_REQUEST_TIMEOUT_SECONDS,
     thinking: bool = False,
+    reasoning_effort: str | None = None,
 ) -> Any:
     # langchain-anthropic falls back to 4096 max output tokens for any model
     # not in its Claude-only profile table. MiniMax-M2.5 triggers that fallback,
@@ -166,6 +167,15 @@ def _build_chat_model(
         # passes. Extended thinking also requires temperature=1.
         model_init_params["thinking"] = {"type": "enabled", "budget_tokens": 4096}
         model_init_params["temperature"] = 1
+    if reasoning_effort:
+        # DeepSeek V4's Anthropic-compatible endpoint controls reasoning depth
+        # via `output_config.effort` ("high" | "max"); it ignores `budget_tokens`.
+        # langchain-anthropic forwards unknown `model_kwargs` in the request body,
+        # so this reaches DeepSeek as a top-level `output_config` field. Only
+        # meaningful when thinking is enabled.
+        model_init_params.setdefault("model_kwargs", {})["output_config"] = {
+            "effort": reasoning_effort,
+        }
     if model_name.startswith("openai:"):
         model_init_params["use_responses_api"] = True
     return init_chat_model(model_name, **model_init_params)
@@ -588,13 +598,13 @@ class OpenStrixApp(DiscordMixin, SchedulerMixin, ToolsMixin):
         tools = self.hooks.wrap_tools(tools)
 
         subagents = self._build_subagents()
-        deep_thinker = self._build_deep_thinker_subagent(
-            model_name,
-            max_tokens=self.config.model_max_output_tokens,
-            request_timeout_seconds=self.config.model_request_timeout_seconds,
+        subagents.extend(
+            self._build_deep_thinker_subagents(
+                model_name,
+                max_tokens=self.config.model_max_output_tokens,
+                request_timeout_seconds=self.config.model_request_timeout_seconds,
+            )
         )
-        if deep_thinker is not None:
-            subagents.append(deep_thinker)
 
         return create_deep_agent(
             model=model,
@@ -622,55 +632,83 @@ class OpenStrixApp(DiscordMixin, SchedulerMixin, ToolsMixin):
             specs.append(spec)
         return specs
 
-    def _build_deep_thinker_subagent(
+    def _build_deep_thinker_subagents(
         self,
         model_name: str,
         *,
         max_tokens: int,
         request_timeout_seconds: int,
-    ) -> SubAgent | None:
-        """Build the opt-in deep-thinking subagent (thinking_enabled in config).
+    ) -> list[SubAgent]:
+        """Build the opt-in deep-thinking subagents (thinking_enabled in config).
 
-        Returns a SubAgent whose model has extended thinking enabled, so the
-        main agent (which runs thinking-off) can delegate hard sub-problems to
-        it via the ``task`` tool. Returns ``None`` when the flag is off.
+        Returns two SubAgent variants whose models have extended thinking
+        enabled, differing only in DeepSeek reasoning effort: ``deep-thinker``
+        (effort ``high``) and ``deep-thinker-max`` (effort ``max``). The main
+        agent (which runs thinking-off) picks the effort per delegation by
+        choosing the ``subagent_type`` — deepagents' ``task`` tool has no
+        per-call effort argument, so variant selection is how effort is set
+        "during the call". Returns an empty list when the flag is off.
 
-        The model is passed as a constructed instance (not a ``provider:model``
-        string) so it can carry the ``thinking`` parameter; deepagents uses the
-        instance directly. Tools are inherited from the main agent so the
-        thinker can read files and run code on challenging coding problems.
+        Each model is passed as a constructed instance (not a ``provider:model``
+        string) so it can carry the ``thinking`` and ``output_config.effort``
+        parameters; deepagents uses the instance directly. Tools are inherited
+        from the main agent so the thinker can read files and run code on
+        challenging coding problems.
         """
         if not self.config.thinking_enabled:
-            return None
-        model = _build_chat_model(
-            model_name,
-            max_retries=self.config.model_max_retries,
-            max_tokens=max_tokens,
-            request_timeout_seconds=request_timeout_seconds,
-            thinking=True,
+            return []
+        system_prompt = (
+            "You are a deep-reasoning specialist. Think rigorously and "
+            "step by step about the problem before answering. For coding "
+            "problems, reason about edge cases, complexity, and "
+            "correctness, and inspect relevant files when useful. Return a "
+            "clear, actionable final answer (plus the key reasoning that "
+            "supports it) — not your entire scratch work."
         )
-        spec: SubAgent = {
-            "name": "deep-thinker",
-            "description": (
-                "Delegate here for problems that need careful, multi-step "
-                "reasoning: tricky algorithm or systems design, debugging "
-                "subtle logic, proofs, planning under ambiguity, or weighing "
-                "non-obvious trade-offs. Use it for CHALLENGING coding "
-                "problems; handle simple/routine coding inline yourself. "
-                "Pass the full problem and relevant context; it returns a "
-                "reasoned answer."
+        base_description = (
+            "Delegate here for problems that need careful, multi-step "
+            "reasoning: tricky algorithm or systems design, debugging "
+            "subtle logic, proofs, planning under ambiguity, or weighing "
+            "non-obvious trade-offs. Use it for CHALLENGING coding "
+            "problems; handle simple/routine coding inline yourself. "
+            "Pass the full problem and relevant context; it returns a "
+            "reasoned answer."
+        )
+        variants = [
+            (
+                "deep-thinker",
+                "high",
+                base_description + " Use this (effort: high) for most hard "
+                "problems.",
             ),
-            "system_prompt": (
-                "You are a deep-reasoning specialist. Think rigorously and "
-                "step by step about the problem before answering. For coding "
-                "problems, reason about edge cases, complexity, and "
-                "correctness, and inspect relevant files when useful. Return a "
-                "clear, actionable final answer (plus the key reasoning that "
-                "supports it) — not your entire scratch work."
+            (
+                "deep-thinker-max",
+                "max",
+                base_description + " Same as deep-thinker but with MAXIMUM "
+                "reasoning effort — reserve it for the most demanding "
+                "problems where deep-thinker's depth is not enough, as it is "
+                "slower.",
             ),
-            "model": model,
-        }
-        return spec
+        ]
+        specs: list[SubAgent] = []
+        for name, effort, description in variants:
+            model = _build_chat_model(
+                model_name,
+                max_retries=self.config.model_max_retries,
+                max_tokens=max_tokens,
+                request_timeout_seconds=request_timeout_seconds,
+                thinking=True,
+                reasoning_effort=effort,
+            )
+            specs.append(
+                {
+                    "name": name,
+                    "description": description,
+                    "system_prompt": system_prompt,
+                    "model": model,
+                }
+            )
+        return specs
 
     def _skill_root_for_source(self, source: str) -> Path | None:
         if source == "/skills":

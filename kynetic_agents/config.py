@@ -208,10 +208,11 @@ class AppConfig:
     model_max_retries: int = DEFAULT_MODEL_MAX_RETRIES
     model_max_output_tokens: int = DEFAULT_MODEL_MAX_OUTPUT_TOKENS
     model_request_timeout_seconds: int = DEFAULT_MODEL_REQUEST_TIMEOUT_SECONDS
-    # Opt-in via `thinking_enabled: true` in config.yaml. When set, a
-    # `deep-thinker` subagent backed by an extended-thinking model is registered
-    # so the main agent can delegate hard sub-problems. The main model itself
-    # stays thinking-off.
+    # Opt-in via `thinking_enabled: true` in config.yaml. When set, two
+    # extended-thinking subagents are registered — `deep-thinker` (DeepSeek
+    # reasoning effort `high`) and `deep-thinker-max` (effort `max`) — so the
+    # main agent can delegate hard sub-problems and pick the effort per call by
+    # choosing the subagent. The main model itself stays thinking-off.
     thinking_enabled: bool = False
     name: str = ""
     journal_entries_in_prompt: int = 90

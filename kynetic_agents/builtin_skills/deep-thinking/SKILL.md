@@ -7,11 +7,17 @@ description: When and how to delegate hard problems to the extended-thinking `de
 
 You run with extended thinking OFF by default — fast and cheap. For problems that
 genuinely need careful, multi-step reasoning, you can delegate to a separate
-`deep-thinker` subagent whose model reasons deeply before answering.
+extended-thinking subagent whose model reasons deeply before answering. Two
+variants are available, differing only in reasoning effort:
+
+* **`deep-thinker`** (effort: high) — the default. Use it for most hard problems.
+* **`deep-thinker-max`** (effort: max) — maximum reasoning effort, but slower.
+  Reserve it for the most demanding problems where `deep-thinker`'s depth isn't
+  enough.
 
 ## Availability
 
-The `deep-thinker` subagent only exists when the operator sets `thinking_enabled: true` in `config.yaml`.
+These subagents only exist when the operator sets `thinking_enabled: true` in `config.yaml`.
 Check your `task` tool: if `deep-thinker` is listed as a target, delegation is
 available. If it is NOT listed, the flag is off — reason inline as usual and do not
 mention the subagent.
@@ -42,7 +48,8 @@ inline. If you'd want to slow down and reason it through, delegate.
 
 ## How to delegate
 
-Call the `task` tool targeting `deep-thinker`. Give it:
+Call the `task` tool targeting `deep-thinker` (or `deep-thinker-max` for the
+hardest problems). Give it:
 
 1. The full problem statement.
 2. The relevant context (file paths, constraints, what you've already tried, what
